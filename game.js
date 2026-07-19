@@ -178,6 +178,7 @@ let eveningScheduleSnapshot=null;
 let eveningScheduleDay=-1;
 let eveningEditing=false;
 let selectedScheduleRoute=null;
+let lastCharacterFrame=performance.now();
 let audioEnabled=true;
 let audioContext=null;
 let cameraKick=0;
@@ -1143,7 +1144,78 @@ function makeBubbleSprite(text) {
   ctx.fillStyle='#17201c';ctx.font='900 46px ui-sans-serif, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,192,66);
   const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;
   const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:false,depthWrite:false}));
-  sprite.scale.set(1.05,.44,1);sprite.position.y=1.57;sprite.visible=false;sprite.renderOrder=20;return sprite;
+  sprite.scale.set(1.05,.44,1);sprite.position.y=1.57;sprite.visible=false;sprite.renderOrder=20;
+  sprite.userData.bubbleCanvas=canvas;sprite.userData.bubbleTexture=texture;sprite.userData.bubbleText=text;
+  return sprite;
+}
+
+const ENCOUNTER_DIALOGUES={
+  general:[
+    ['Ты это в графике видел?','Я график видел. Он меня — нет.'],['Кто крайний по акту?','Акт крайний. Мы внутри.'],['Материал приехал?','Приехало письмо о материале.'],['Срочно — это сегодня?','Нет, это вчера после обеда.'],
+    ['Прораб сказал «пять минут».','Значит, до следующей пятницы.'],['Здесь всегда так?','Нет. Иногда ещё хуже.'],['Чей удлинитель?','Теперь уже юридический вопрос.'],['Ты обедал?','Я согласовывал обед.'],
+    ['Почему стоим?','Ждём человека, который знает, почему.'],['Где чертёж?','В почте. В какой — решает судьба.'],['Я всё сделал.','Тогда молчи, а то найдут ещё.'],['Это временно?','На стройке всё временно. Даже постоянное.'],
+    ['Кто перенёс коробки?','Тот же, кто потерял накладную.'],['Сегодня сдадим?','Сегодня обязательно пообещаем.'],['Тут была стена.','Она ушла по замечанию.'],['Кофе есть?','Есть замечание к кофе.'],
+    ['Ты видел заказчика?','Он видел наш процент выполнения.'],['Проблемы есть?','Проблем нет. Есть вопросы.'],['Что сверлим?','Уверенность заказчика.'],['Сначала делаем или согласуем?','Сначала делаем вид.'],
+  ],
+  work:[
+    ['Цвет тот?','Тот. До следующего письма.'],['Кабель куда?','По проекту — сюда. По факту — созвонимся.'],['Стол проходит?','Если снять дверь, стену и амбиции.'],['Труба за стеной.','Значит, стену строили убедительно.'],
+    ['Уровень ровный?','Уровень честный. Пол — нет.'],['Можно закрывать?','Сфотографируй сначала. Мы учёные.'],['Перфоратор заряжен?','Соседи уже тоже.'],['Мебель собрана?','Лишние детали подтверждают запас прочности.'],
+    ['Акт подписали?','Подписант на совещании про ускорение.'],['Краска сохнет?','Да. График — быстрее.'],['Фронт готов?','Фронт морально готовится.'],['Это по РД?','Это по сильной команде.'],
+  ],
+  client:[
+    ['Когда закончите?','Раньше отчёта. Возможно.'],['Почему здесь люди стоят?','Это оперативный штаб в курилке.'],['А можно дешевле?','Можно. Но потом будет дороже.'],['Почему не тот цвет?','Он тот при согласованном освещении.'],
+    ['Где мой кабинет?','Сейчас он проходит стадию поля.'],['Процент настоящий?','Он управленческий.'],['Вы успеваете?','Мы уже формулируем ответ.'],['Почему шумно?','Офис становится тише через разрушение.'],
+    ['Сколько ещё денег?','Смотря насколько точно вы хотите знать.'],['Можно завтра заехать?','Можно. Работать — отдельное согласование.'],['Это входит в смету?','В разговор — точно входит.'],['Почему дверь тут?','Она ищет своё место вместе с нами.'],
+  ],
+  architect:[
+    ['Так было задумано.','А построено тоже будет задумано?'],['Этот серый слишком холодный.','Рабочим пока жарко.'],['Где теневой шов?','Ушёл в тень.'],['Не трогайте композицию.','Она перекрывает кабельный лоток.'],
+    ['На визуализации красивее.','Там подрядчика не было.'],['Нужен бесшовный узел.','У нас пока бесхозный.'],['Сдвинем стену на 40 мм.','Трубу предупредить?'],['Свет должен быть мягким.','Электрик сегодня тоже.'],
+    ['Это авторский надзор.','Тогда автор сейчас удивится.'],['Мебель должна парить.','Грузчики уже готовы отпустить.'],
+  ],
+  authority:[
+    ['Где журнал работ?','Он ведётся к вам.'],['Акт скрытых работ?','Работы так хорошо скрыты, что ищем.'],['Каска застёгнута?','После вашего вопроса — да.'],['Кто ответственный?','Сейчас все посмотрят на прораба.'],
+    ['Почему проход закрыт?','Чтобы никто не увидел открытый вопрос.'],['Документация готова?','Физически она существует.'],['Предъявляли работу?','Мы предъявляли намерение.'],['Замечание устранили?','Мы устранили слово «проблема».'],
+  ],
+};
+let activeEncounterDialogue=null;
+let nextEncounterDialogueAt=0;
+
+function paintBubble(sprite,text) {
+  if(!sprite||sprite.userData.bubbleText===text)return;
+  const canvas=sprite.userData.bubbleCanvas,texture=sprite.userData.bubbleTexture;if(!canvas||!texture)return;
+  const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);ctx.fillStyle='rgba(248,250,244,.96)';ctx.beginPath();ctx.roundRect(12,10,360,112,34);ctx.fill();ctx.beginPath();ctx.moveTo(175,120);ctx.lineTo(205,120);ctx.lineTo(188,150);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#17201c';ctx.font=`900 ${text.length>26?31:text.length>18?37:46}px ui-sans-serif, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,192,66,340);texture.needsUpdate=true;sprite.userData.bubbleText=text;
+}
+
+function encounterPoolFor(a,b) {
+  const roles=new Set([a.userData.role,b.userData.role]);
+  if(['police','inspector','boss'].some(role=>roles.has(role)))return ENCOUNTER_DIALOGUES.authority;
+  if(roles.has('client'))return ENCOUNTER_DIALOGUES.client;
+  if(roles.has('architect'))return ENCOUNTER_DIALOGUES.architect;
+  if(a.userData.crewId||b.userData.crewId)return Math.random()<.56?ENCOUNTER_DIALOGUES.work:ENCOUNTER_DIALOGUES.general;
+  return ENCOUNTER_DIALOGUES.general;
+}
+
+function hierarchyVisible(node) { for(let cursor=node;cursor;cursor=cursor.parent)if(!cursor.visible)return false;return true; }
+
+function updateEncounterDialogue(t) {
+  if(activeEncounterDialogue){
+    const dialogue=activeEncounterDialogue;const elapsed=t-dialogue.started;
+    if(elapsed>3.25||!hierarchyVisible(dialogue.a)||!hierarchyVisible(dialogue.b)){
+      dialogue.a.userData.bubble.visible=false;dialogue.b.userData.bubble.visible=false;paintBubble(dialogue.a.userData.bubble,dialogue.a.userData.defaultBubble);paintBubble(dialogue.b.userData.bubble,dialogue.b.userData.defaultBubble);activeEncounterDialogue=null;nextEncounterDialogueAt=t+5+Math.random()*8;return;
+    }
+    const first=elapsed<1.55;paintBubble(dialogue.a.userData.bubble,dialogue.lines[0]);paintBubble(dialogue.b.userData.bubble,dialogue.lines[1]);dialogue.a.userData.bubble.visible=first;dialogue.b.userData.bubble.visible=!first;setPersonMotion(dialogue.a,first?'argue':'idle');setPersonMotion(dialogue.b,first?'idle':'argue');return;
+  }
+  if(t<nextEncounterDialogueAt||state.paused||!state.started)return;
+  nextEncounterDialogueAt=t+2.5;
+  const people=[];office.traverse(node=>{if(node.userData?.isPerson&&hierarchyVisible(node))people.push(node);});
+  const positionA=new THREE.Vector3(),positionB=new THREE.Vector3(),candidates=[];
+  for(let i=0;i<people.length;i++)for(let j=i+1;j<people.length;j++){
+    const a=people[i],b=people[j];if((a.userData.dialogueCooldown??0)>t||(b.userData.dialogueCooldown??0)>t)continue;a.getWorldPosition(positionA);b.getWorldPosition(positionB);const distance=positionA.distanceTo(positionB);if(distance<1.05)candidates.push({a,b,distance});
+  }
+  if(!candidates.length||Math.random()>.64)return;
+  const pair=candidates[Math.floor(Math.random()*candidates.length)];const pool=encounterPoolFor(pair.a,pair.b);const lines=pool[Math.floor(Math.random()*pool.length)];
+  pair.a.userData.dialogueCooldown=t+20+Math.random()*18;pair.b.userData.dialogueCooldown=t+20+Math.random()*18;activeEncounterDialogue={...pair,lines,started:t};
 }
 
 function makeTaskMarkers() {
@@ -1155,6 +1227,118 @@ function rebuildTaskMarkers() {
   for(const group of markerMeshes.values())office.remove(group);
   markerMeshes.clear();
   makeTaskMarkers();
+}
+
+const CHARACTER_ASSETS={
+  workerMale:'./assets/characters/Worker_Male.glb',
+  workerFemale:'./assets/characters/Worker_Female.glb',
+  suitMale:'./assets/characters/Suit_Male.glb',
+  suitFemale:'./assets/characters/Suit_Female.glb',
+};
+const characterTemplates=new Map();
+const pendingCharacterUpgrades=new Set();
+let characterAssetsLoading=false;
+let cloneCharacterSkeleton=null;
+
+function characterAssetKey(role,variant,avatar) {
+  const female=variant%2===1||['architect','medic'].includes(role);
+  const suited=['client','boss','inspector','architect','police','medic'].includes(role)||(role==='player'&&avatar?.outfit==='suit');
+  return `${suited?'suit':'worker'}${female?'Female':'Male'}`;
+}
+
+async function loadCharacterAssets() {
+  if(characterAssetsLoading)return;
+  characterAssetsLoading=true;
+  const [{GLTFLoader},{clone}]=await Promise.all([import('three/addons/loaders/GLTFLoader.js'),import('three/addons/utils/SkeletonUtils.js')]);
+  cloneCharacterSkeleton=clone;
+  const loader=new GLTFLoader();
+  await Promise.all(Object.entries(CHARACTER_ASSETS).map(async ([key,url])=>{
+    try { characterTemplates.set(key,await loader.loadAsync(url)); }
+    catch(error){ console.warn(`Character asset ${key} unavailable; keeping lightweight fallback.`,error); }
+  }));
+  for(const request of pendingCharacterUpgrades) attachRiggedCharacter(request.person,request.spec,request.legacyVisuals,request.hq);
+  pendingCharacterUpgrades.clear();
+}
+
+function addRigAccessories(person,{role,color,profile,avatar}) {
+  const isPlayer=role==='player';
+  const isWorker=['worker','foreman','moving','paint','electric','furniture','cleaning','delivery'].includes(role)||(isPlayer&&avatar?.outfit!=='suit');
+  const accessoryRoot=new THREE.Group();accessoryRoot.name='rig-accessories';person.add(accessoryRoot);
+  if(isPlayer&&!isWorker){
+    const helmetColor=avatar?.helmet==='visor'?'#202a2b':'#f4f5ee';
+    const cap=isPlayer&&avatar?.helmet==='cap';
+    const dome=new THREE.Mesh(cap?new THREE.CylinderGeometry(.105,.165,.075,16):new THREE.SphereGeometry(.158,16,8,0,Math.PI*2,0,Math.PI/2),mat(helmetColor,.34,.08));
+    dome.position.y=1.28;dome.castShadow=true;accessoryRoot.add(dome);
+    const brim=new THREE.Mesh(new THREE.CylinderGeometry(.19,.19,.035,18),mat(helmetColor,.34,.08));brim.position.set(0,1.245,.035);accessoryRoot.add(brim);
+  }
+  if(role==='architect'){
+    const beret=new THREE.Mesh(new THREE.CylinderGeometry(.12,.19,.06,20),mat(['#2c2e2d','#643e48','#3b5460'][profile.accessory%3],.55));beret.position.set(-.025,1.29,0);beret.rotation.z=.14;accessoryRoot.add(beret);
+    const scarfColor=['#d87561','#d1b45c','#6f9a91'][profile.bubbleVariant%3];const scarf=new THREE.Mesh(new THREE.TorusGeometry(.15,.025,8,20),mat(scarfColor));scarf.rotation.x=Math.PI/2;scarf.position.y=.98;accessoryRoot.add(scarf);
+    box('rig-plans',[.28,.38,.025],[-.29,.64,.14],mat('#dce7e3'),accessoryRoot);
+  }
+  if(['client','boss','inspector'].includes(role))box('rig-folder',[.28,.34,.035],[-.3,.59,.16],mat(role==='client'?'#704d35':role==='boss'?'#2d3431':'#d2b95f'),accessoryRoot);
+  if(role==='police'){
+    const cap=new THREE.Mesh(new THREE.CylinderGeometry(.12,.18,.09,16),mat('#17345a',.5));cap.position.y=1.28;accessoryRoot.add(cap);box('rig-cap-brim',[.23,.025,.12],[0,1.245,.11],mat('#17345a'),accessoryRoot);box('rig-badge',[.055,.075,.018],[-.1,.76,.17],mat('#e4c44c',.3,.3),accessoryRoot);
+  }
+  if(role==='medic'){
+    const cap=new THREE.Mesh(new THREE.SphereGeometry(.16,14,8,0,Math.PI*2,0,Math.PI/2),mat('#e6efeb'));cap.position.y=1.25;accessoryRoot.add(cap);box('rig-medical-cross',[.13,.035,.02],[0,.76,.17],mat('#dc554d'),accessoryRoot);box('rig-medical-cross',[.035,.13,.022],[0,.76,.175],mat('#dc554d'),accessoryRoot);
+  }
+  if(role==='moving')box('rig-held-box',[.38,.3,.31],[0,.56,.31],mat('#b9824c'),accessoryRoot);
+  if(role==='furniture')box('rig-furniture-panel',[.56,.09,.34],[0,.55,.31],mat('#9b704b'),accessoryRoot).rotation.x=-.08;
+  if(role==='paint'){const roller=new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,.72,8),mat('#59645e'));roller.position.set(.31,.63,.08);roller.rotation.z=-.2;accessoryRoot.add(roller);box('rig-roller-head',[.25,.07,.08],[.39,.96,.08],mat('#e5e1d5'),accessoryRoot);}
+  if(role==='cleaning'){const mop=new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,.9,8),mat('#718078'));mop.position.set(.34,.52,.08);mop.rotation.z=-.28;accessoryRoot.add(mop);box('rig-mop-head',[.3,.045,.14],[.46,.08,.08],mat('#78cbb0'),accessoryRoot);}
+  if(role==='electric')box('rig-tool-bag',[.18,.2,.13],[.25,.46,-.02],mat('#284a5e'),accessoryRoot);
+  if(role==='foreman'||isPlayer)box('rig-tablet',[.23,.32,.028],[-.3,.63,.16],mat('#263b40',.28,.2),accessoryRoot);
+}
+
+function rigMaterialColor(name,{role,color,profile,avatar}) {
+  const roleColor=role==='player'?(avatar?.color??color):role==='client'?'#3f6d86':role==='boss'?'#72536f':role==='inspector'?'#66808a':role==='architect'?'#9a6578':role==='police'?'#275b91':role==='medic'?'#d7e9e5':color;
+  const key=name.toLowerCase();
+  if(key.includes('face')||key==='skin')return profile.skin;
+  if(key.includes('hair'))return profile.hair;
+  if(key.includes('hat'))return role==='player'?'#f4f5ee':role==='foreman'?'#f4f5ee':role==='police'?'#17345a':role==='medic'?'#e6efeb':'#f2c84e';
+  if(key.includes('vest')||key==='black')return roleColor;
+  if(key.includes('shirt'))return ['worker','moving','paint','electric','furniture','cleaning','delivery','foreman','player'].includes(role)?new THREE.Color(roleColor).lerp(new THREE.Color('#dbe6dc'),.42):'#edf1ec';
+  if(key.includes('detail'))return role==='architect'?'#d1b45c':role==='client'?'#d87561':'#b9d6c9';
+  if(key.includes('pants'))return role==='police'?'#172c48':'#33433f';
+  if(key.includes('belt'))return '#29312f';
+  return null;
+}
+
+function customizeRigMaterial(material,spec) {
+  const customized=material.clone();const target=rigMaterialColor(customized.name??'',spec);if(target)customized.color.set(target);
+  if('emissive' in customized){customized.emissive.copy(customized.color);customized.emissiveIntensity=.1;}
+  customized.roughness=Math.max(.56,customized.roughness??.7);return customized;
+}
+
+function attachRiggedCharacter(person,spec,legacyVisuals,hq=false) {
+  if(person.userData.characterRig)return true;
+  const template=characterTemplates.get(characterAssetKey(spec.role,spec.variant,spec.avatar));
+  if(!template)return false;
+  if(!cloneCharacterSkeleton)return false;
+  const rig=cloneCharacterSkeleton(template.scene);rig.name='animated-character';rig.userData.riggedAsset=true;
+  rig.traverse(node=>{node.userData.riggedAsset=true;if(node.isMesh){node.castShadow=true;node.receiveShadow=true;node.frustumCulled=false;node.material=Array.isArray(node.material)?node.material.map(material=>customizeRigMaterial(material,spec)):customizeRigMaterial(node.material,spec);}});
+  const bounds=new THREE.Box3().setFromObject(rig);const size=bounds.getSize(new THREE.Vector3());const rigScale=1.34/Math.max(size.y,.01);
+  rig.scale.setScalar(rigScale);rig.position.y=-bounds.min.y*rigScale;rig.rotation.y=Math.PI;
+  legacyVisuals.forEach(item=>{item.visible=false;});person.add(rig);
+  if(!hq)addRigAccessories(person,spec);
+  const mixer=new THREE.AnimationMixer(rig);const actions={};
+  for(const clip of template.animations){actions[clip.name]=mixer.clipAction(clip);}
+  const idle=actions.Idle??Object.values(actions)[0];idle?.play();
+  person.userData.characterRig=rig;person.userData.characterMixer=mixer;person.userData.characterActions=actions;person.userData.characterAction=idle;
+  return true;
+}
+
+function requestRiggedCharacter(person,spec,legacyVisuals,hq=false) {
+  if(!attachRiggedCharacter(person,spec,legacyVisuals,hq))pendingCharacterUpgrades.add({person,spec,legacyVisuals,hq});
+}
+
+function setPersonMotion(person,motion) {
+  const actions=person.userData.characterActions;if(!actions)return;
+  const clipNames={idle:'Idle',walk:'Walk',carry:'Walk_Carry',work:'PickUp',argue:'Punch',celebrate:'Victory'};
+  const next=actions[clipNames[motion]]??actions.Idle??Object.values(actions)[0];
+  if(!next||person.userData.characterAction===next)return;
+  const previous=person.userData.characterAction;next.reset().fadeIn(.18).play();previous?.fadeOut(.18);person.userData.characterAction=next;
 }
 
 function makeCapsule(radius, length, color, roughness=.72) {
@@ -1266,6 +1450,7 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
   if(profile.accessory===1&&!isWorker) {
     for(const x of [-.07,.07]){const lens=new THREE.Mesh(new THREE.TorusGeometry(.045,.009,6,14),mat('#252b2a',.3,.25));lens.position.set(x,1.09,.132);person.add(lens);}
   }
+  const legacyVisuals=person.children.slice();
   const hitbox=new THREE.Mesh(new THREE.CapsuleGeometry(.36,1.02,4,8),new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,colorWrite:false}));
   hitbox.position.y=.62;person.add(hitbox);
   const bubbleText=bubbleFor(role,profile.bubbleVariant+variant);
@@ -1283,9 +1468,10 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
 
   const names=PERSON_NAMES[role]??PERSON_NAMES.worker;
   const displayName=role==='client'&&state.selectedOrder?.clientPerson?state.selectedOrder.clientPerson:(['police','inspector','boss','medic'].includes(role)?names[variant%names.length]:profile.name);
-  const personScale=isPlayer?.98:.74;
+  const personScale=isPlayer?.86:.64;
   person.scale.set(profile.body*personScale,profile.height*personScale,profile.body*personScale);
-  person.userData={isPerson:true,role,displayName:isPlayer?(sessionUser??'Вы'):displayName,job:isPlayer?'Технический заказчик · ваш аватар':PERSON_JOBS[role]??PERSON_JOBS.worker,leftLeg,rightLeg,leftArm,rightArm,variant,bubble,alertBubble,selectionRing,playerAura,playerBadge,playerMarker,profile};
+  person.userData={isPerson:true,role,displayName:isPlayer?(sessionUser??'Вы'):displayName,job:isPlayer?'Технический заказчик · ваш аватар':PERSON_JOBS[role]??PERSON_JOBS.worker,leftLeg,rightLeg,leftArm,rightArm,variant,bubble,defaultBubble:bubbleText,alertBubble,selectionRing,playerAura,playerBadge,playerMarker,profile};
+  requestRiggedCharacter(person,{role,color,profile,avatar,variant},legacyVisuals);
   return person;
 }
 
@@ -1324,6 +1510,7 @@ function syncEventActors() {
   }
 }
 
+loadCharacterAssets().catch(error=>console.warn('Rigged characters failed to initialize; lightweight fallback remains active.',error));
 makeOffice();
 sceneProps.scalableAssets=office.children.filter(child=>![sceneProps.yard,sceneProps.architect,sceneProps.client].includes(child));
 sceneProps.scalableAssets.forEach(child=>{child.userData.baseTransform={position:child.position.clone(),scale:child.scale.clone()};});
@@ -1491,6 +1678,8 @@ function indexedFieldColor(tile) {
 
 function animateScene(now) {
   const t=now*.001;
+  const characterDelta=Math.min(.05,Math.max(0,(now-lastCharacterFrame)/1000));lastCharacterFrame=now;
+  if(!state.paused)office.traverse(node=>{node.userData?.characterMixer?.update(characterDelta);});
   const beat=state.ambientBeat;
   const beatKind=beat?.kind;
   const dayProgress=THREE.MathUtils.clamp((state.elapsed%24)/9,0,1);
@@ -1540,6 +1729,7 @@ function animateScene(now) {
         person.userData.rightArm.rotation.z=-argumentMotion-briefingPose;
         person.rotation.y=travel>.03?Math.atan2(yardX-base.x,yardZ-base.z)+(deliveryCycle>.56?Math.PI:0):siteWalking?0:groupMoment?(index%2?-.9:.9):Math.sin(t*.55+index)*.32;
         person.userData.bubble.visible=!walking&&(groupMoment||Math.sin(t*.9+index*2.1+crew.x)>.78);
+        setPersonMotion(person,walking?(physical?'carry':'walk'):groupMoment&&beatKind==='argument'?'argue':physical?'work':'idle');
       }
     } else {
       mesh.position.y=.03;
@@ -1549,6 +1739,7 @@ function animateScene(now) {
         person.userData.leftLeg.rotation.x=idleShift*.06;person.userData.rightLeg.rotation.x=-idleShift*.06;
         person.userData.leftArm.rotation.x=Math.sin(t*1.7+crew.x)*.13;person.userData.rightArm.rotation.x=-Math.sin(t*1.7+crew.x)*.13;
         person.rotation.y=Math.sin(t*.22+(person.userData.variant??0))*.32;person.userData.bubble.visible=Math.sin(t*.42+(person.userData.variant??0)*2.4)>.9;
+        setPersonMotion(person,'idle');
       }
     }
     const hasQuestion=(state.activeSituations??[]).some(item=>item.crewId===crew.id);
@@ -1583,18 +1774,21 @@ function animateScene(now) {
     sceneProps.architect.position.x=-1.25+Math.sin(t*(beatKind==='inspection'?.62:.28))*(beatKind==='inspection'?.72:.32);
     sceneProps.architect.rotation.y=.65+Math.sin(t*.21)*.22;
     sceneProps.architect.userData.rightArm.rotation.x=Math.sin(t*1.3)*.18;
+    setPersonMotion(sceneProps.architect,beatKind==='inspection'?'walk':'idle');
   }
   if(sceneProps.client?.visible) {
     sceneProps.client.position.z=2.25+Math.sin(t*.22)*.28;
     sceneProps.client.rotation.y=-2.35+Math.sin(t*.19)*.18;
     sceneProps.client.userData.leftArm.rotation.x=Math.sin(t*(beatKind==='inspection'?2.2:.9))*(beatKind==='inspection'?.28:.12);
     sceneProps.client.userData.bubble.visible=beatKind==='inspection'||beatKind==='briefing';
+    setPersonMotion(sceneProps.client,beatKind==='inspection'?'walk':'idle');
   }
   for(const [index,actor] of (sceneProps.eventActors??[]).entries()) {
     actor.position.y=.03+Math.abs(Math.sin(t*2.2+index))*.025;
     actor.userData.leftArm.rotation.x=Math.sin(t*1.4+index)*.1;
     actor.userData.rightArm.rotation.x=-Math.sin(t*1.4+index)*.1;
     actor.userData.bubble.visible=Math.sin(t*.75+index*1.8)>.62;
+    setPersonMotion(actor,index%2?'idle':'walk');
   }
   if(sceneProps.truck) {
     const truckCycle=(t*.09)%1;
@@ -1620,6 +1814,7 @@ function animateScene(now) {
     smoker.position.y=.02+Math.sin(t*1.4+index)*.012;
     smoker.userData.leftArm.rotation.x=-.6+Math.sin(t*2+index)*.18;
     smoker.userData.bubble.visible=Math.sin(t*.55+index*2)>.72;
+    setPersonMotion(smoker,'idle');
   }
   for(const [index,puff] of sceneProps.smokePuffs.entries()) {
     if(!puff.visible)continue;
@@ -1628,6 +1823,7 @@ function animateScene(now) {
     puff.material.opacity=(1-cycle)*.24;
   }
   office.traverse(node=>{if(node.userData?.isPerson&&node.userData.selectionRing){node.userData.selectionRing.visible=node===selectedPerson;if(node.userData.playerAura){const pulse=1+Math.sin(t*3.6)*.09;node.userData.playerAura.scale.setScalar(pulse);node.userData.playerAura.rotation.z=t*.4;}if(node.userData.playerBadge)node.userData.playerBadge.material.opacity=.9+Math.sin(t*2.4)*.08;if(node.userData.playerMarker){node.userData.playerMarker.position.y=2.34+Math.sin(t*3.4)*.09;node.userData.playerMarker.rotation.y=t*1.7;}}});
+  updateEncounterDialogue(t);
 }
 
 function resizeRenderer() {
