@@ -787,15 +787,53 @@ function makeSink(x,z) {
   office.add(group);return group;
 }
 
+function addVehicleWheel(vehicle,x,z,radius=.255) {
+  const axle=new THREE.Group();axle.position.set(x,radius,z);vehicle.add(axle);
+  const tire=new THREE.Mesh(new THREE.CylinderGeometry(radius,radius,.18,22),mat('#111514',.62,.08));tire.rotation.z=Math.PI/2;tire.castShadow=true;axle.add(tire);
+  const rim=new THREE.Mesh(new THREE.CylinderGeometry(radius*.48,radius*.48,.188,18),mat('#9da7a2',.3,.72));rim.rotation.z=Math.PI/2;axle.add(rim);
+  const hub=new THREE.Mesh(new THREE.CylinderGeometry(radius*.16,radius*.16,.195,14),mat('#303a36',.3,.58));hub.rotation.z=Math.PI/2;axle.add(hub);
+  vehicle.userData.wheels.push(axle);return axle;
+}
+
 function makeTruck() {
-  const truck=new THREE.Group();
-  box('truck-cargo',[1.35,.92,1.9],[0,.72,0],mat('#d7ddd6'),truck);
-  box('truck-cab',[1.35,.85,.8],[0,.63,1.32],mat('#d87561'),truck);
-  box('windshield',[1.08,.34,.025],[0,.82,1.73],mat('#6f999b',.2,.25),truck);
-  for(const x of [-.58,.58])for(const z of [-.58,1.28]) {
-    const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.23,.23,.16,18),mat('#171b19',.45));wheel.rotation.z=Math.PI/2;wheel.position.set(x,.27,z);truck.add(wheel);
+  const truck=new THREE.Group();truck.name='delivery-truck';truck.userData={wheels:[],vehicle:true};
+  box('truck-chassis',[1.42,.16,3.42],[0,.36,.22],mat('#252e2b',.42,.55),truck);
+  box('truck-cargo',[1.48,1.18,1.96],[0,1.03,-.45],mat('#e5e8e2',.48,.08),truck);
+  box('truck-cargo-roof',[1.54,.09,2.03],[0,1.66,-.45],mat('#cdd4cf',.38,.18),truck);
+  box('truck-side-panel',[.025,.52,1.35],[-.752,1.07,-.42],mat('#d6e644',.46,.04),truck);
+  box('truck-side-stripe',[.028,.12,1.65],[-.77,.82,-.42],mat('#28342f',.5,.16),truck);
+  box('truck-rear-door',[1.22,.9,.035],[0,1.05,-1.45],mat('#d5dad5',.52,.12),truck);
+  box('truck-rear-split',[.035,.88,.04],[0,1.05,-1.475],mat('#65716c',.45,.3),truck);
+  box('truck-cab',[1.42,.95,.96],[0,.84,1.02],mat('#dc755f',.42,.12),truck);
+  box('truck-cab-roof',[1.48,.1,.94],[0,1.37,1.0],mat('#bc5949',.38,.16),truck);
+  box('truck-windshield',[1.08,.4,.035],[0,1.04,1.515],mat('#4d7e8c',.12,.42),truck);
+  for(const x of [-.718,.718]) {
+    box('truck-side-window',[.025,.35,.48],[x,1.05,1.06],mat('#4f7d88',.14,.38),truck);
+    box('truck-mirror',[.07,.17,.13],[x*1.12,1.12,1.42],mat('#202927',.38,.48),truck);
   }
-  return truck;
+  box('truck-grille',[.75,.26,.04],[0,.66,1.515],mat('#29332f',.38,.66),truck);
+  box('truck-bumper',[1.5,.14,.18],[0,.37,1.52],mat('#b7c0bb',.3,.7),truck);
+  for(const x of [-.47,.47]) {
+    box('truck-headlight',[.22,.16,.045],[x,.72,1.54],new THREE.MeshStandardMaterial({color:'#fff0b2',emissive:'#ffd45c',emissiveIntensity:.9,roughness:.25}),truck);
+  }
+  addVehicleWheel(truck,-.72,-.92,.29);addVehicleWheel(truck,.72,-.92,.29);addVehicleWheel(truck,-.72,.96,.29);addVehicleWheel(truck,.72,.96,.29);
+  truck.scale.set(.82,.82,.82);return truck;
+}
+
+function makeServiceVan() {
+  const van=new THREE.Group();van.name='service-van';van.userData={wheels:[],vehicle:true};
+  box('van-chassis',[1.2,.14,2.38],[0,.31,0],mat('#222b28',.45,.5),van);
+  box('van-body',[1.18,.72,1.68],[0,.74,-.16],mat('#f0eee5',.4,.06),van);
+  box('van-cab',[1.18,.65,.76],[0,.68,.9],mat('#69bfe8',.38,.12),van);
+  box('van-roof',[1.2,.1,1.9],[0,1.14,.03],mat('#d9e1df',.35,.12),van);
+  box('van-windshield',[.88,.29,.035],[0,.88,1.295],mat('#426b78',.1,.42),van);
+  for(const x of [-.598,.598]) box('van-side-window',[.025,.27,.48],[x,.88,.83],mat('#426b78',.12,.38),van);
+  box('van-side-mark',[.028,.24,.76],[-.61,.72,-.27],mat('#25332e',.48,.12),van);
+  box('van-bumper-front',[1.26,.12,.13],[0,.33,1.3],mat('#353f3b',.44,.42),van);
+  box('van-bumper-rear',[1.26,.12,.13],[0,.33,-1.19],mat('#353f3b',.44,.42),van);
+  for(const x of [-.4,.4])box('van-headlight',[.18,.12,.04],[x,.58,1.32],new THREE.MeshStandardMaterial({color:'#fff1ad',emissive:'#ffd45c',emissiveIntensity:.65}),van);
+  addVehicleWheel(van,-.6,-.72,.235);addVehicleWheel(van,.6,-.72,.235);addVehicleWheel(van,-.6,.78,.235);addVehicleWheel(van,.6,.78,.235);
+  van.scale.set(.76,.76,.76);return van;
 }
 
 function makeOffice() {
@@ -875,6 +913,7 @@ function makeOffice() {
   for(let i=0;i<5;i++) box('yard-pallet',[.75,.16,.58],[6.05+(i%2)*.84,.09+i*.11,1.0+Math.floor(i/2)*.62],mat('#9b704b'),sceneProps.yard);
   for(let i=0;i<4;i++) box('yard-scrap',[.4+i*.09,.08,.28],[7.65+(i%2)*.4,.12,1.0+Math.floor(i/2)*.62],mat(i%2?'#8e5e45':'#828d88'),sceneProps.yard);
   sceneProps.truck=makeTruck();sceneProps.truck.position.set(8.95,.01,4.8);sceneProps.yard.add(sceneProps.truck);
+  sceneProps.serviceVan=makeServiceVan();sceneProps.serviceVan.position.set(7.55,.01,-1.1);sceneProps.serviceVan.rotation.y=Math.PI;sceneProps.yard.add(sceneProps.serviceVan);
   sceneProps.smokers=[];
   for(let i=0;i<3;i++) {
     const smoker=makePerson({role:'worker',color:['#e9ad52','#69bfe8','#9d85d8'][i],skin:['#d6a47d','#b97855','#edc39d'][i],variant:i});
@@ -1335,41 +1374,46 @@ function animateScene(now) {
     const mesh=crewMeshes.get(crew.id); if(!mesh) continue;
     const inBeat=beat?.crewId===crew.id;
     const groupMoment=inBeat&&['argument','briefing','inspection'].includes(beatKind);
-    const patrol=crew.taskId||crew.id==='foreman'||crew.id.startsWith('team-');
-    const wander=groupMoment?.08:patrol?(crew.taskId ? .34 : .72):0;
+    const sceneRunning=state.started&&!state.paused;
+    const patrol=Boolean(crew.taskId||crew.id==='foreman'||crew.id.startsWith('team-')||sceneRunning);
+    const wander=groupMoment?.08:patrol?(crew.taskId ? .62 : .92):0;
     const phase=crewIndex*1.73;
-    const routeX=Math.sin(t*.48+phase)+Math.sin(t*.19+phase*.7)*.34;
-    const routeZ=Math.cos(t*.37+phase*.82)+Math.sin(t*.23+phase)*.28;
+    const routeX=Math.sin(t*.72+phase)+Math.sin(t*.31+phase*.7)*.34;
+    const routeZ=Math.cos(t*.58+phase*.82)+Math.sin(t*.37+phase)*.28;
     const target=new THREE.Vector3(siteX(crew.x)+routeX*wander,.03,siteZ(crew.y)+routeZ*wander);
     const delta=target.clone().sub(mesh.position);
-    mesh.rotation.y=0;
-    mesh.position.lerp(target,.055);
+    const siteWalking=patrol&&!groupMoment&&delta.lengthSq()>.00012;
+    if(siteWalking)mesh.rotation.y=THREE.MathUtils.lerp(mesh.rotation.y,Math.atan2(delta.x,delta.z),.12);
+    mesh.position.lerp(target,sceneRunning?.078:.035);
     if(patrol) {
-      mesh.position.y=.03+Math.abs(Math.sin(t*6.6+crew.x))*.065;
+      mesh.position.y=.03+Math.abs(Math.sin(t*7.4+crew.x))*(siteWalking?.038:.012);
       for(const [index,person] of mesh.userData.people.entries()) {
         const physical=['moving','paint','electric','furniture','cleaning'].includes(crew.skill)&&crew.taskId&&!groupMoment;
-        const deliveryCycle=(t*.075+crewIndex*.17)%1;
-        const travel=physical&&index===0?(deliveryCycle<.45?THREE.MathUtils.smoothstep(deliveryCycle,0,.45):deliveryCycle<.56?1:THREE.MathUtils.smoothstep(1-deliveryCycle,0,.44)):0;
+        const deliveryCycle=(t*.105+crewIndex*.17)%1;
+        const travel=physical&&index===0?(deliveryCycle<.42?THREE.MathUtils.smoothstep(deliveryCycle,0,.42):deliveryCycle<.56?1:THREE.MathUtils.smoothstep(1-deliveryCycle,0,.44)):0;
         const base=person.userData.baseLocal;
-        const yardX=(6.25+(footprintScale()-1)*5.2)-mesh.position.x;const yardZ=1.2-mesh.position.z;
-        person.position.x=THREE.MathUtils.lerp(base.x+Math.sin(t*1.35+index)*.08,yardX,travel);person.position.z=THREE.MathUtils.lerp(base.z+Math.cos(t*1.05+index)*.1,yardZ,travel);
-        const walking=travel>.03&&travel<.97;const swing=Math.sin(t*(walking?10.2:6.4)+index)*(.22+(walking?.48:.08));
+        const yardDx=(6.25+(footprintScale()-1)*5.2)-mesh.position.x;const yardDz=1.2-mesh.position.z;const crewCos=Math.cos(mesh.rotation.y);const crewSin=Math.sin(mesh.rotation.y);
+        const yardX=crewCos*yardDx-crewSin*yardDz;const yardZ=crewSin*yardDx+crewCos*yardDz;
+        person.position.x=THREE.MathUtils.lerp(base.x+Math.sin(t*1.65+index)*.1,yardX,travel);person.position.z=THREE.MathUtils.lerp(base.z+Math.cos(t*1.35+index)*.12,yardZ,travel);
+        const walking=(travel>.03&&travel<.97)||(siteWalking&&travel<.03);const swing=Math.sin(t*(walking?11.4:6.8)+index)*(.3+(walking?.48:.08));
         const workBeat=crew.taskId?Math.sin(t*4.6+index):0;
         person.userData.leftLeg.rotation.x=swing; person.userData.rightLeg.rotation.x=-swing;
         const argumentMotion=inBeat&&beatKind==='argument'?Math.sin(t*7.4+index)*.72:0;
         const briefingPose=inBeat&&beatKind==='briefing'?(index%2?-.25:.3):0;
-        const paintMotion=crew.skill==='paint'&&!walking?workBeat*.82:0;const drillMotion=(crew.skill==='electric'||beatKind==='drill')&&!walking?Math.sin(t*18+index)*.34:0;const carryPose=walking&&physical?-.72:0;
+        const paintMotion=crew.skill==='paint'&&!walking?workBeat*1.02:0;const drillMotion=(crew.skill==='electric'||beatKind==='drill')&&!walking?Math.sin(t*21+index)*.62:0;const carryPose=walking&&physical?-.86:0;
         person.userData.leftArm.rotation.x=-swing*.55+paintMotion+carryPose;person.userData.rightArm.rotation.x=swing*.55+drillMotion+(crew.skill==='furniture'&&!walking?-.55:carryPose);
         person.userData.leftArm.rotation.z=argumentMotion+briefingPose;
         person.userData.rightArm.rotation.z=-argumentMotion-briefingPose;
-        person.rotation.y=walking?Math.atan2(yardX-base.x,yardZ-base.z)+(deliveryCycle>.56?Math.PI:0):groupMoment?(index%2?-.9:.9):Math.sin(t*.4+index)*.25;
+        person.rotation.y=travel>.03?Math.atan2(yardX-base.x,yardZ-base.z)+(deliveryCycle>.56?Math.PI:0):siteWalking?0:groupMoment?(index%2?-.9:.9):Math.sin(t*.55+index)*.32;
         person.userData.bubble.visible=!walking&&(groupMoment||Math.sin(t*.9+index*2.1+crew.x)>.78);
       }
     } else {
       mesh.position.y=.03;
       for(const person of mesh.userData.people) {
-        person.userData.leftLeg.rotation.x=0;person.userData.rightLeg.rotation.x=0;
-        person.userData.leftArm.rotation.x=Math.sin(t*1.7+crew.x)*.05;person.userData.rightArm.rotation.x=-Math.sin(t*1.7+crew.x)*.05;
+        const idleShift=Math.sin(t*2.1+(person.userData.variant??0));
+        person.position.y=(person.userData.baseLocal?.y??0)+Math.abs(idleShift)*.018;
+        person.userData.leftLeg.rotation.x=idleShift*.06;person.userData.rightLeg.rotation.x=-idleShift*.06;
+        person.userData.leftArm.rotation.x=Math.sin(t*1.7+crew.x)*.13;person.userData.rightArm.rotation.x=-Math.sin(t*1.7+crew.x)*.13;
         person.rotation.y=Math.sin(t*.22+(person.userData.variant??0))*.32;person.userData.bubble.visible=Math.sin(t*.42+(person.userData.variant??0)*2.4)>.9;
       }
     }
@@ -1419,10 +1463,21 @@ function animateScene(now) {
     actor.userData.bubble.visible=Math.sin(t*.75+index*1.8)>.62;
   }
   if(sceneProps.truck) {
-    sceneProps.truck.position.z=beatKind==='delivery'?3.05:5.4-((t*.62)%11.4);
+    const truckCycle=(t*.09)%1;
+    if(beatKind==='delivery')sceneProps.truck.position.z=2.72;
+    else if(truckCycle<.34)sceneProps.truck.position.z=THREE.MathUtils.lerp(5.25,2.72,THREE.MathUtils.smoothstep(truckCycle,0,.34));
+    else if(truckCycle<.58)sceneProps.truck.position.z=2.72;
+    else sceneProps.truck.position.z=THREE.MathUtils.lerp(2.72,-5.35,THREE.MathUtils.smoothstep(truckCycle,.58,1));
     sceneProps.truck.rotation.y=Math.PI;
-    const doorOpen=Math.abs(sceneProps.truck.position.z-3.0)<1.25||sceneProps.client?.visible;
+    sceneProps.truck.userData.wheels.forEach(wheel=>{wheel.rotation.x=-t*7.5;});
+    const doorOpen=Math.abs(sceneProps.truck.position.z-2.72)<.72||sceneProps.client?.visible;
     sceneProps.entryDoor.rotation.y=THREE.MathUtils.lerp(sceneProps.entryDoor.rotation.y,doorOpen?-1.12:0,.06);
+  }
+  if(sceneProps.serviceVan) {
+    const vanCycle=(t*.075+.46)%1;
+    sceneProps.serviceVan.position.z=THREE.MathUtils.lerp(-5.15,5.15,vanCycle);
+    sceneProps.serviceVan.rotation.y=0;
+    sceneProps.serviceVan.userData.wheels.forEach(wheel=>{wheel.rotation.x=t*8.2;});
   }
   if(sceneProps.beacon?.visible){sceneProps.beacon.rotation.y=t*4.8;sceneProps.beacon.userData.lamp.material.emissiveIntensity=1.4+Math.sin(t*12)*.8;}
   if(sceneProps.measureTape?.visible){sceneProps.measureTape.rotation.y=Math.sin(t*.55)*.18;sceneProps.measureTape.scale.x=.82+Math.sin(t*1.8)*.16;}
@@ -1565,7 +1620,9 @@ $('#siteEmailButton').addEventListener('click',()=>openCommunication('email'));
 $('#teamButton').addEventListener('click',()=>{renderTeamBook();refs.team.classList.add('visible');});
 $('#financeButton').addEventListener('click',()=>{renderFinanceBook();refs.finance.classList.add('visible');});
 $('#docsButton').addEventListener('click',()=>{renderDocsBook();refs.docs.classList.add('visible');});
-$('#saveExitButton').addEventListener('click',()=>{state.paused=true;saved=state;persistGame();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');renderMainMenu();refs.menu.classList.add('visible');showToast('Объект сохранён и поставлен на управленческую паузу.','done');});
+function saveAndOpenMenu(){state.paused=true;saved=state;persistGame();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');renderMainMenu();refs.menu.classList.add('visible');showToast('Объект сохранён и поставлен на управленческую паузу.','done');}
+$('#saveExitButton').addEventListener('click',saveAndOpenMenu);
+$('#menuButton').addEventListener('click',saveAndOpenMenu);
 $('#closeCommunication').addEventListener('click',closeCommunication);
 $('#masterScheduleButton').addEventListener('click',openMasterSchedule);
 $('#topScheduleButton').addEventListener('click',openMasterSchedule);
