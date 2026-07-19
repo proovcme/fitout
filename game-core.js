@@ -1,5 +1,5 @@
 import { buildTasksForOrder } from './order-generator.js';
-import { generateSiteLine } from './procedural-content.js';
+import { generateAmbientBeat, generateSiteLine } from './procedural-content.js';
 import { SITUATIONS, situationById } from './situations.js';
 import { randomEventById } from './events/index.js';
 
@@ -202,6 +202,10 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     randomEvents,
     eventSchedule: scheduleRandomEvents(randomEvents,eventCatalog,rng),
     sceneEffect: null,
+    ambientBeat:null,
+    ambientBeatCount:0,
+    ambientHistory:[],
+    nextAmbientBeatAt:.75+rng()*.55,
     hq: {
       level: 0,
       title: 'Стол у принтера',
@@ -272,6 +276,7 @@ function recordCash(state,type,category,amount,text) {
 }
 
 function situationRoll(state,salt=0){const value=Math.sin((state.visualSeed??17)*.017+(state.situationCount??0)*12.9898+salt)*43758.5453;return value-Math.floor(value);}
+function ambientRoll(state,salt=0){const value=Math.sin((state.visualSeed??23)*.031+(state.ambientBeatCount??0)*9.731+salt)*24634.6345;return value-Math.floor(value);}
 function applySituationDeltas(state,deltas={},text='Ситуация на объекте'){
   const budget=deltas.budget??0;state.budget+=budget;state.elapsed+=deltas.time??0;state.quality=Math.max(0,Math.min(100,state.quality+(deltas.quality??0)));state.trust=Math.max(0,Math.min(100,state.trust+(deltas.trust??0)));
   if(budget)recordCash(state,budget>0?'income':'expense','Решение',Math.abs(budget),text);
@@ -295,6 +300,26 @@ function updateSituations(state){
   if(resolver&&situationRoll(state,11)<.62){applySituationDeltas(state,template.choices[0].deltas,template.title);state.log.push({type:'done',text:`${resolver.name} сам(а) решил(а): ${template.title}`});return;}
   state.activeSituations.push({uid,templateId:template.id,crewId:target?.id??'foreman',createdAt:state.elapsed,expiresAt:state.elapsed+2.4});
   state.log.push({type:'risk',text:`Новый вопрос на площадке: ${template.title}`});
+}
+
+export function updateAmbientActivity(state){
+  state.ambientBeatCount??=0;state.ambientHistory??=[];state.nextAmbientBeatAt??=state.elapsed+.75;
+  if(state.ambientBeat?.expiresAt<=state.elapsed)state.ambientBeat=null;
+  if(state.ambientBeat||state.elapsed<state.nextAmbientBeatAt)return state.ambientBeat;
+  const present=state.crews.filter(crew=>(crew.unavailableUntil??0)<=state.elapsed);
+  const working=present.filter(crew=>crew.taskId);
+  const pool=working.length?working:present;
+  const crew=pool[Math.floor(ambientRoll(state,5)*Math.max(1,pool.length))]??state.crews.find(item=>item.id==='foreman');
+  const skill=crew?.skill??'management';
+  const generated=state.smokeBreak&&ambientRoll(state,7)<.38
+    ? {kind:'break',skill,text:'Курилка проводит внеплановую координацию. На объекте временно стало просторнее.'}
+    : generateAmbientBeat(skill,(state.visualSeed??0)+state.ambientBeatCount*17);
+  const id=`beat-${state.ambientBeatCount}-${generated.kind}`;
+  state.ambientBeatCount+=1;
+  state.ambientBeat={...generated,id,crewId:crew?.id??null,taskId:crew?.taskId??null,startedAt:state.elapsed,expiresAt:state.elapsed+.34+ambientRoll(state,11)*.18};
+  state.ambientHistory.unshift({id,text:generated.text,kind:generated.kind,hour:state.elapsed});state.ambientHistory=state.ambientHistory.slice(0,18);
+  state.nextAmbientBeatAt=state.elapsed+.82+ambientRoll(state,13)*.58;
+  return state.ambientBeat;
 }
 
 export function closeDayFinances(state) {
@@ -587,6 +612,7 @@ export function tickState(state, deltaHours) {
   const dayIndex=Math.floor(state.elapsed/24);
   if(dayIndex>state.plannedDay){state.needsPlanning=true;state.paused=true;for(const task of state.tasks)task.enabledToday=false;return state;}
   state.smokeBreak=Math.floor(state.elapsed/8)%4===2;
+  updateAmbientActivity(state);
   updateSituations(state);
   unlockTasks(state);
   assignCrews(state);

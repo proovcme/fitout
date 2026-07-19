@@ -352,9 +352,11 @@ function renderPreparation() {
 function renderDayPlan() {
   const dayIndex=Math.floor(state.elapsed/24);
   const candidates=scheduledTasksForDay(state,dayIndex);
+  const hasSelectedTask=candidates.some(task=>task.enabledToday&&!['done','active'].includes(task.status));
   $('#planningTitle').textContent=`День ${dayIndex+1}: что сегодня действительно важно?`;
   $('#dayPlanList').innerHTML=candidates.map(task=>`<button class="day-plan-card ${task.enabledToday?'selected':''}" data-day-task="${task.id}"><span class="task-status" style="--task-color:${task.color}">${ICONS[task.reworkOf?'clean':task.id]??'↺'}</span><span><strong>${task.title}</strong><small>${task.duration} ч · ${SKILL_LABELS[task.skill]}${task.outOfSequence?' · РИСК ПОСЛЕДОВАТЕЛЬНОСТИ':''}</small></span><b>P${task.priority}</b></button>`).join('');
   if(!candidates.length)$('#dayPlanList').innerHTML='<div class="empty-day-plan">На этот день незавершённых работ по графику нет. Редкий управленческий успех.</div>';
+  $('#startDay').disabled=!hasSelectedTask;
 }
 
 function scheduleStage(task) {
@@ -594,6 +596,24 @@ function renderHud() {
   sitePause?.classList.toggle('is-paused',state.paused);
   if(sitePause)sitePause.innerHTML=state.paused?'▶ <span>ПРОДОЛЖИТЬ</span>':'Ⅱ <span>ПАУЗА</span>';
   document.querySelectorAll('[data-speed]').forEach((button) => button.classList.toggle('active', Number(button.dataset.speed) === state.speed));
+  renderAmbientBeat();
+}
+
+let renderedAmbientBeatId=null;
+function renderAmbientBeat() {
+  const chip=$('#siteBeat');
+  const label=$('#siteBeatText');
+  const beat=state.ambientBeat;
+  if(!chip||!label)return;
+  if(!beat){chip.hidden=true;renderedAmbientBeatId=null;return;}
+  chip.hidden=false;
+  chip.dataset.kind=beat.kind;
+  label.textContent=beat.text;
+  if(renderedAmbientBeatId===beat.id)return;
+  renderedAmbientBeatId=beat.id;
+  chip.classList.remove('fresh');
+  requestAnimationFrame(()=>chip.classList.add('fresh'));
+  if(audioContext&&audioEnabled)playSound(['delivery','drill','power-test'].includes(beat.kind)?'build':'message');
 }
 
 function renderTutorial() {
@@ -647,6 +667,7 @@ const camera = new THREE.OrthographicCamera(-8, 8, 6, -6, 0.1, 100);
 let cameraAngle = Math.PI / 4;
 let cameraZoom = 1;
 const cameraTarget = new THREE.Vector3(1.6, 0.3, 0);
+const cameraFocus = new THREE.Vector3();
 
 const renderer = new THREE.WebGLRenderer({ canvas: refs.canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -660,7 +681,8 @@ scene.add(new THREE.HemisphereLight('#dfffe5', '#20241d', 2.0));
 const sun = new THREE.DirectionalLight('#fff6dc', 3.2);
 sun.position.set(5, 10, 7);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+const shadowSize=window.matchMedia('(max-width: 640px)').matches?1024:2048;
+sun.shadow.mapSize.set(shadowSize, shadowSize);
 sun.shadow.camera.left = -10; sun.shadow.camera.right = 10; sun.shadow.camera.top = 10; sun.shadow.camera.bottom = -10;
 scene.add(sun);
 const fill = new THREE.PointLight('#9cc7ff', 8, 18);
@@ -672,6 +694,13 @@ scene.add(office);
 const markerMeshes = new Map();
 const crewMeshes = new Map();
 const sceneProps = {};
+sceneProps.workLight=new THREE.PointLight('#ffd07a',0,4.8);
+sceneProps.workLight.castShadow=false;
+office.add(sceneProps.workLight);
+const morningSky=new THREE.Color('#1a2420');
+const eveningSky=new THREE.Color('#17201f');
+const morningSun=new THREE.Color('#fff6dc');
+const eveningSun=new THREE.Color('#ffc883');
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 const unit = 1.15;
@@ -887,9 +916,26 @@ function makeOffice() {
   // of teleporting from a spreadsheet state into a finished office.
   sceneProps.partitions=new THREE.Group();sceneProps.partitions.name='build-partitions';office.add(sceneProps.partitions);
   const partitionSpecs=[[-.9,-.2,3.25,.11,0],[1.55,.72,2.7,.11,0],[-.15,1.75,.11,2.35,1],[2.75,1.52,.11,1.75,1]];
+  sceneProps.partitionStuds=new THREE.Group();sceneProps.partitionStuds.name='partition-studs';office.add(sceneProps.partitionStuds);
+  sceneProps.partitionStudMembers=[];
+  partitionSpecs.forEach(([x,z,w,d,axis],segmentIndex)=>{
+    const run=axis?d:w;
+    for(let index=0;index<5;index++){
+      const offset=-run/2+(run*index/4);
+      const stud=box('partition-stud',[.045,1.5,.045],[x+(axis?0:offset),.78,z+(axis?offset:0)],mat('#aeb8b6',.32,.72),sceneProps.partitionStuds);
+      stud.userData={segmentIndex,index};sceneProps.partitionStudMembers.push(stud);
+    }
+    const track=box('partition-track',axis?[.07,.045,d]:[w,.045,.07],[x,.055,z],mat('#9aa7a5',.3,.76),sceneProps.partitionStuds);
+    track.userData={segmentIndex,index:5,isTrack:true};sceneProps.partitionStudMembers.push(track);
+  });
   sceneProps.partitionSegments=partitionSpecs.map(([x,z,w,d,axis],index)=>{
     const wall=box('partition-segment',[w,1.55,d],[x,.78,z],mat(index%2?'#d9d6ca':'#e4dfd2'),sceneProps.partitions);wall.userData={axis,index,baseHeight:1.55};return wall;
   });
+  sceneProps.measureTape=new THREE.Group();sceneProps.measureTape.name='measurement-action';office.add(sceneProps.measureTape);
+  box('measure-line',[2.7,.022,.035],[0,.08,0],mat('#f4cb42',.4,.15),sceneProps.measureTape,false);
+  box('measure-stop',[.035,.14,.08],[-1.35,.12,0],mat('#f4cb42'),sceneProps.measureTape,false);
+  box('measure-stop',[.035,.14,.08],[1.35,.12,0],mat('#f4cb42'),sceneProps.measureTape,false);
+  sceneProps.measureTape.visible=false;
   sceneProps.engineering=new THREE.Group();sceneProps.engineering.name='build-engineering';office.add(sceneProps.engineering);
   sceneProps.engineeringSegments=[];
   [[-3.7,2.15,-.4,3.7,.07,.08],[-3.7,2.22,.25,3.7,.06,.06],[-1.8,2.32,-2.55,.08,.07,4.8],[1.65,2.28,-2.55,.12,.11,4.8]].forEach(([x,y,z,w,h,d],index)=>{
@@ -903,6 +949,10 @@ function makeOffice() {
   box('handover-stand',[1.65,.08,.55],[3.15,.74,3.1],mat('#ddff55'),sceneProps.handover);box('handover-sign',[1.45,.72,.06],[3.15,1.12,3.12],mat('#18211d'),sceneProps.handover);sceneProps.handover.visible=false;
   sceneProps.workParticles=[];
   for(let i=0;i<18;i++){const particle=new THREE.Mesh(new THREE.SphereGeometry(.025+(i%3)*.008,6,4),new THREE.MeshBasicMaterial({color:i%4===0?'#ffd45c':'#c4b59d',transparent:true,opacity:.72,depthWrite:false}));particle.visible=false;office.add(particle);sceneProps.workParticles.push(particle);}
+  sceneProps.beacon=new THREE.Group();sceneProps.beacon.name='delivery-beacon';sceneProps.yard.add(sceneProps.beacon);
+  const beaconBase=new THREE.Mesh(new THREE.CylinderGeometry(.13,.16,.1,12),mat('#303936',.34,.45));beaconBase.position.y=.05;sceneProps.beacon.add(beaconBase);
+  const beaconLamp=new THREE.Mesh(new THREE.CylinderGeometry(.1,.12,.2,12),new THREE.MeshStandardMaterial({color:'#f6a843',emissive:'#ff6b24',emissiveIntensity:2,transparent:true,opacity:.82}));beaconLamp.position.y=.2;sceneProps.beacon.add(beaconLamp);sceneProps.beacon.userData.lamp=beaconLamp;
+  sceneProps.beacon.position.set(8.15,.02,3.35);sceneProps.beacon.visible=false;
   // Ceiling lights.
   sceneProps.lights = [];
   for(let x=-3;x<=3;x+=2) for(let z=-2;z<=2;z+=2) {
@@ -1106,10 +1156,17 @@ sceneProps.scalableAssets=office.children.filter(child=>![sceneProps.yard,sceneP
 sceneProps.scalableAssets.forEach(child=>{child.userData.baseTransform={position:child.position.clone(),scale:child.scale.clone()};});
 makeTaskMarkers();
 
-function updateCamera() {
+function updateCamera(t=0) {
   const scale=footprintScale();const distance=13*Math.max(1,scale*.9);
-  cameraTarget.x=1.6+(scale-1)*2.6;
-  camera.position.set(cameraTarget.x+Math.cos(cameraAngle)*distance,10,cameraTarget.z+Math.sin(cameraAngle)*distance);
+  const beatTask=state.ambientBeat?.taskId?state.tasks.find(task=>task.id===state.ambientBeat.taskId):null;
+  const desiredX=beatTask?siteX(beatTask.x)*.08:0;
+  const desiredZ=beatTask?siteZ(beatTask.y)*.08:0;
+  cameraFocus.x=THREE.MathUtils.lerp(cameraFocus.x,desiredX,.025);
+  cameraFocus.z=THREE.MathUtils.lerp(cameraFocus.z,desiredZ,.025);
+  cameraTarget.x=1.6+(scale-1)*2.6+cameraFocus.x;
+  cameraTarget.z=cameraFocus.z;
+  const drift=Math.sin(t*.18)*.055;
+  camera.position.set(cameraTarget.x+Math.cos(cameraAngle)*distance+drift,10+Math.sin(t*.11)*.025,cameraTarget.z+Math.sin(cameraAngle)*distance-drift);
   camera.lookAt(cameraTarget);
   camera.zoom=cameraZoom;
   camera.updateProjectionMatrix();
@@ -1159,8 +1216,10 @@ function syncSceneFromState() {
     if(mesh.userData.people?.length>1) mesh.userData.people[1].visible=!state.smokeBreak;
   }
   syncEventActors();
-  sceneProps.smokers.forEach((smoker,index)=>{smoker.visible=state.started&&(index===0||state.smokeBreak);});
-  sceneProps.smokePuffs.forEach(puff=>{puff.visible=state.started;});
+  const ambientKind=state.ambientBeat?.kind;
+  const ambientBreak=ambientKind==='break';
+  sceneProps.smokers.forEach((smoker,index)=>{smoker.visible=state.started&&(index===0||state.smokeBreak||ambientBreak);});
+  sceneProps.smokePuffs.forEach(puff=>{puff.visible=state.started&&(state.smokeBreak||ambientBreak||sceneProps.smokers[0]?.visible);});
 
   const moveTask=state.tasks.find(t=>t.id==='move');
   const electricTask=state.tasks.find(t=>t.id==='electric');
@@ -1174,9 +1233,18 @@ function syncSceneFromState() {
   const partitionBase=siteType==='existing'?.18:0;
   const partitionProgress=Math.max(partitionBase,prepProgress);
   sceneProps.partitions.visible=partitionProgress>.01;
+  sceneProps.partitionStuds.visible=partitionProgress>.01&&partitionProgress<.99;
   sceneProps.partitionSegments.forEach((wall,index)=>{
-    const fraction=THREE.MathUtils.clamp(partitionProgress*sceneProps.partitionSegments.length-index,0,1);
+    const raw=THREE.MathUtils.clamp(partitionProgress*sceneProps.partitionSegments.length-index,0,1);
+    const fraction=THREE.MathUtils.clamp((raw-.28)/.72,0,1);
+    wall.visible=fraction>.01;
     wall.scale.y=Math.max(.025,fraction);wall.position.y=.03+.75*fraction;
+  });
+  sceneProps.partitionStudMembers.forEach(stud=>{
+    const raw=THREE.MathUtils.clamp(partitionProgress*sceneProps.partitionSegments.length-stud.userData.segmentIndex,0,1);
+    const fraction=THREE.MathUtils.clamp(raw/.42,0,1);
+    stud.visible=fraction>.01&&raw<.98;
+    if(!stud.userData.isTrack){stud.scale.y=Math.max(.025,fraction);stud.position.y=.03+.75*fraction;}
   });
 
   const engineeringProgress=electricTask?.status==='done'?1:electricTask?.progress??0;
@@ -1212,7 +1280,12 @@ function syncSceneFromState() {
   const constructionStarted=state.tasks.some(task=>task.id!=='survey'&&['active','done'].includes(task.status));
   sceneProps.debris.visible=constructionStarted&&cleanTask?.status!=='done';
   const activePhysical=state.tasks.find(task=>task.status==='active'&&['move','electric','prep','paint','desks','clean'].includes(task.id));
-  sceneProps.workParticles.forEach(particle=>{particle.visible=Boolean(activePhysical);particle.userData.taskId=activePhysical?.id;});
+  const ambientPhysical=['drill','cleanup','power-test'].includes(ambientKind);
+  sceneProps.workParticles.forEach(particle=>{particle.visible=Boolean(activePhysical||ambientPhysical);particle.userData.taskId=activePhysical?.id??(ambientKind==='cleanup'?'clean':'electric');});
+  const beatTask=state.ambientBeat?.taskId?state.tasks.find(task=>task.id===state.ambientBeat.taskId):null;
+  sceneProps.measureTape.visible=ambientKind==='measurement';
+  if(sceneProps.measureTape.visible){sceneProps.measureTape.position.set(siteX(beatTask?.x??3.6),.02,siteZ(beatTask?.y??2.5));}
+  sceneProps.beacon.visible=ambientKind==='delivery';
 
   const electricPower=state.sceneEffect?.lightPower??(electricTask?.status==='done'?1:electricTask?.status==='active'?electricTask.progress:0);
   sceneProps.lights.forEach(light=>{light.intensity=electricPower*1.15;light.userData.fixture.material.emissive?.set('#fff0bc');light.userData.fixture.material.emissiveIntensity=electricPower*1.6;});
@@ -1231,7 +1304,7 @@ function syncSceneFromState() {
   });
 
   sceneProps.architect.visible=state.started;
-  sceneProps.client.visible=state.started&&(state.elapsed>10||['ready','active','done'].includes(inspectTask?.status));
+  sceneProps.client.visible=state.started&&(state.elapsed>10||['inspection','briefing'].includes(ambientKind)||['ready','active','done'].includes(inspectTask?.status));
   if(state.sceneEffect?.debris) {
     const visibleCount=Math.min(sceneProps.debris.children.length,Math.max(0,state.sceneEffect.debris));
     sceneProps.debris.children.forEach((item,index)=>{item.visible=sceneProps.debris.visible&&index<visibleCount;});
@@ -1245,6 +1318,14 @@ function indexedFieldColor(tile) {
 
 function animateScene(now) {
   const t=now*.001;
+  const beat=state.ambientBeat;
+  const beatKind=beat?.kind;
+  const dayProgress=THREE.MathUtils.clamp((state.elapsed%24)/9,0,1);
+  scene.background.copy(morningSky).lerp(eveningSky,dayProgress);
+  scene.fog.color.copy(scene.background);
+  sun.color.copy(morningSun).lerp(eveningSun,dayProgress);
+  sun.intensity=3.2-dayProgress*.65;
+  fill.intensity=8+dayProgress*1.4;
   for(const task of state.tasks) {
     const marker=markerMeshes.get(task.id); if(!marker||!marker.visible) continue;
     marker.children[0].rotation.z=t*(task.status==='active'?1.3:.35);
@@ -1252,8 +1333,10 @@ function animateScene(now) {
   }
   for(const [crewIndex,crew] of state.crews.entries()) {
     const mesh=crewMeshes.get(crew.id); if(!mesh) continue;
+    const inBeat=beat?.crewId===crew.id;
+    const groupMoment=inBeat&&['argument','briefing','inspection'].includes(beatKind);
     const patrol=crew.taskId||crew.id==='foreman'||crew.id.startsWith('team-');
-    const wander=patrol?(crew.taskId ? .34 : .72):0;
+    const wander=groupMoment?.08:patrol?(crew.taskId ? .34 : .72):0;
     const phase=crewIndex*1.73;
     const routeX=Math.sin(t*.48+phase)+Math.sin(t*.19+phase*.7)*.34;
     const routeZ=Math.cos(t*.37+phase*.82)+Math.sin(t*.23+phase)*.28;
@@ -1264,7 +1347,7 @@ function animateScene(now) {
     if(patrol) {
       mesh.position.y=.03+Math.abs(Math.sin(t*6.6+crew.x))*.065;
       for(const [index,person] of mesh.userData.people.entries()) {
-        const physical=['moving','paint','electric','furniture','cleaning'].includes(crew.skill)&&crew.taskId;
+        const physical=['moving','paint','electric','furniture','cleaning'].includes(crew.skill)&&crew.taskId&&!groupMoment;
         const deliveryCycle=(t*.075+crewIndex*.17)%1;
         const travel=physical&&index===0?(deliveryCycle<.45?THREE.MathUtils.smoothstep(deliveryCycle,0,.45):deliveryCycle<.56?1:THREE.MathUtils.smoothstep(1-deliveryCycle,0,.44)):0;
         const base=person.userData.baseLocal;
@@ -1273,10 +1356,14 @@ function animateScene(now) {
         const walking=travel>.03&&travel<.97;const swing=Math.sin(t*(walking?10.2:6.4)+index)*(.22+(walking?.48:.08));
         const workBeat=crew.taskId?Math.sin(t*4.6+index):0;
         person.userData.leftLeg.rotation.x=swing; person.userData.rightLeg.rotation.x=-swing;
-        const paintMotion=crew.skill==='paint'&&!walking?workBeat*.82:0;const drillMotion=crew.skill==='electric'&&!walking?Math.sin(t*18+index)*.34:0;const carryPose=walking&&physical?-.72:0;
+        const argumentMotion=inBeat&&beatKind==='argument'?Math.sin(t*7.4+index)*.72:0;
+        const briefingPose=inBeat&&beatKind==='briefing'?(index%2?-.25:.3):0;
+        const paintMotion=crew.skill==='paint'&&!walking?workBeat*.82:0;const drillMotion=(crew.skill==='electric'||beatKind==='drill')&&!walking?Math.sin(t*18+index)*.34:0;const carryPose=walking&&physical?-.72:0;
         person.userData.leftArm.rotation.x=-swing*.55+paintMotion+carryPose;person.userData.rightArm.rotation.x=swing*.55+drillMotion+(crew.skill==='furniture'&&!walking?-.55:carryPose);
-        person.rotation.y=walking?Math.atan2(yardX-base.x,yardZ-base.z)+(deliveryCycle>.56?Math.PI:0):Math.sin(t*.4+index)*.25;
-        person.userData.bubble.visible=!walking&&Math.sin(t*.9+index*2.1+crew.x)>.78;
+        person.userData.leftArm.rotation.z=argumentMotion+briefingPose;
+        person.userData.rightArm.rotation.z=-argumentMotion-briefingPose;
+        person.rotation.y=walking?Math.atan2(yardX-base.x,yardZ-base.z)+(deliveryCycle>.56?Math.PI:0):groupMoment?(index%2?-.9:.9):Math.sin(t*.4+index)*.25;
+        person.userData.bubble.visible=!walking&&(groupMoment||Math.sin(t*.9+index*2.1+crew.x)>.78);
       }
     } else {
       mesh.position.y=.03;
@@ -1291,22 +1378,39 @@ function animateScene(now) {
   }
 
   const activeTask=state.tasks.find(task=>task.status==='active'&&['move','electric','prep','paint','desks','clean'].includes(task.id));
+  const particleTask=activeTask??(beatKind==='cleanup'?state.tasks.find(task=>task.id==='clean'):['drill','power-test'].includes(beatKind)?state.tasks.find(task=>task.id==='electric'):null);
   for(const [index,particle] of sceneProps.workParticles.entries()) {
-    if(!particle.visible||!activeTask)continue;
-    const cycle=(t*(activeTask.id==='electric'?2.8:.72)+index*.113)%1;
-    particle.position.set(siteX(activeTask.x)+Math.sin(index*2.4)*(.2+cycle*.45),.12+cycle*(activeTask.id==='electric'?.55:1.15),siteZ(activeTask.y)+Math.cos(index*1.7)*(.18+cycle*.38));
-    particle.material.opacity=(1-cycle)*(activeTask.id==='electric'?.95:.38);particle.scale.setScalar(activeTask.id==='electric'?.55+cycle:1+cycle*1.6);
+    if(!particle.visible||!particleTask)continue;
+    const electric=particleTask.id==='electric';
+    const cycle=(t*(electric?2.8:.72)+index*.113)%1;
+    particle.position.set(siteX(particleTask.x)+Math.sin(index*2.4)*(.2+cycle*.45),.12+cycle*(electric?.55:1.15),siteZ(particleTask.y)+Math.cos(index*1.7)*(.18+cycle*.38));
+    particle.material.color.set(electric?'#75cfff':'#c4b59d');
+    particle.material.opacity=(1-cycle)*(electric?.95:.38);particle.scale.setScalar(electric?.55+cycle:1+cycle*1.6);
+  }
+
+  if(sceneProps.workLight){
+    const focusTask=particleTask??(beat?.taskId?state.tasks.find(task=>task.id===beat.taskId):null);
+    if(focusTask){sceneProps.workLight.position.set(siteX(focusTask.x),1.45,siteZ(focusTask.y));sceneProps.workLight.intensity=.65+Math.sin(t*8)*.12+(beatKind==='power-test'?1.25:0);}
+    else sceneProps.workLight.intensity=0;
+  }
+  if(beatKind==='power-test') {
+    sceneProps.lights.forEach((light,index)=>{
+      const pulse=.45+Math.abs(Math.sin(t*(9.5+index*.7)+index*1.9))*.75;
+      light.intensity=Math.max(light.intensity,pulse);
+      light.userData.fixture.material.emissiveIntensity=pulse*1.35;
+    });
   }
 
   if(sceneProps.architect?.visible) {
-    sceneProps.architect.position.x=-1.25+Math.sin(t*.28)*.32;
+    sceneProps.architect.position.x=-1.25+Math.sin(t*(beatKind==='inspection'?.62:.28))*(beatKind==='inspection'?.72:.32);
     sceneProps.architect.rotation.y=.65+Math.sin(t*.21)*.22;
     sceneProps.architect.userData.rightArm.rotation.x=Math.sin(t*1.3)*.18;
   }
   if(sceneProps.client?.visible) {
     sceneProps.client.position.z=2.25+Math.sin(t*.22)*.28;
     sceneProps.client.rotation.y=-2.35+Math.sin(t*.19)*.18;
-    sceneProps.client.userData.leftArm.rotation.x=Math.sin(t*.9)*.12;
+    sceneProps.client.userData.leftArm.rotation.x=Math.sin(t*(beatKind==='inspection'?2.2:.9))*(beatKind==='inspection'?.28:.12);
+    sceneProps.client.userData.bubble.visible=beatKind==='inspection'||beatKind==='briefing';
   }
   for(const [index,actor] of (sceneProps.eventActors??[]).entries()) {
     actor.position.y=.03+Math.abs(Math.sin(t*2.2+index))*.025;
@@ -1315,11 +1419,13 @@ function animateScene(now) {
     actor.userData.bubble.visible=Math.sin(t*.75+index*1.8)>.62;
   }
   if(sceneProps.truck) {
-    sceneProps.truck.position.z=5.4-((t*.62)%11.4);
+    sceneProps.truck.position.z=beatKind==='delivery'?3.05:5.4-((t*.62)%11.4);
     sceneProps.truck.rotation.y=Math.PI;
     const doorOpen=Math.abs(sceneProps.truck.position.z-3.0)<1.25||sceneProps.client?.visible;
     sceneProps.entryDoor.rotation.y=THREE.MathUtils.lerp(sceneProps.entryDoor.rotation.y,doorOpen?-1.12:0,.06);
   }
+  if(sceneProps.beacon?.visible){sceneProps.beacon.rotation.y=t*4.8;sceneProps.beacon.userData.lamp.material.emissiveIntensity=1.4+Math.sin(t*12)*.8;}
+  if(sceneProps.measureTape?.visible){sceneProps.measureTape.rotation.y=Math.sin(t*.55)*.18;sceneProps.measureTape.scale.x=.82+Math.sin(t*1.8)*.16;}
   for(const [index,smoker] of sceneProps.smokers.entries()) {
     if(!smoker.visible)continue;
     smoker.position.y=.02+Math.sin(t*1.4+index)*.012;
@@ -1486,13 +1592,14 @@ function frame(now) {
   const dt=Math.min(.08,(now-lastFrame)/1000); lastFrame=now;
   tickState(state,dt*state.speed*GAME_HOURS_PER_REAL_SECOND);
   if(state.log.length>renderedLogLength){for(const item of state.log.slice(renderedLogLength)){showToast(item.text,item.type);if(item.type==='start')feedback('build');else if(item.type==='done')feedback('done');else if(item.type==='risk'||item.type==='event')feedback('risk');}renderedLogLength=state.log.length;renderAll();}
-  if(state.needsPlanning&&!refs.planning.classList.contains('visible')){renderDayPlan();refs.planning.classList.add('visible');}
+  const planningBlocked=[refs.auth,refs.menu,refs.orders,refs.brief,refs.market,refs.schedule,refs.communication,refs.team,refs.finance,refs.docs,refs.report,refs.situation,refs.result].some(modal=>modal?.classList.contains('visible'));
+  if(state.needsPlanning&&!planningBlocked&&!refs.planning.classList.contains('visible')){renderDayPlan();refs.planning.classList.add('visible');}
   if(state.needsReport)openReport();
   const managementOpen=[refs.auth,refs.menu,refs.orders,refs.brief,refs.market,refs.communication,refs.schedule,refs.team,refs.finance,refs.docs,refs.planning,refs.report,refs.situation,refs.result].some(modal=>modal?.classList.contains('visible'));
   if(state.eventQueue.length&&!eventShowing&&!refs.event.classList.contains('visible')&&!managementOpen)openEvent(state.eventQueue[0]);
   if(state.completed)showResult();
-  renderHud();renderTutorial();syncSceneFromState();animateScene(now);resizeRenderer();
-  if(cameraKick>.005){updateCamera();camera.position.x+=Math.sin(now*.11)*cameraKick;camera.position.y+=Math.cos(now*.09)*cameraKick*.35;camera.lookAt(cameraTarget);cameraKick*=.86;}
+  renderHud();renderTutorial();syncSceneFromState();animateScene(now);resizeRenderer();updateCamera(now*.001);
+  if(cameraKick>.005){camera.position.x+=Math.sin(now*.11)*cameraKick;camera.position.y+=Math.cos(now*.09)*cameraKick*.35;camera.lookAt(cameraTarget);cameraKick*=.86;}
   renderer.render(scene,camera);
   if(now-lastSaved>2500){persistGame();lastSaved=now;}
   requestAnimationFrame(frame);

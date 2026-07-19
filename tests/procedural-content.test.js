@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateOrders, makeSeededRng } from '../order-generator.js';
-import { createPersonProfile, createVisualProfile, generateSiteLine } from '../procedural-content.js';
-import { GAME_HOURS_PER_REAL_SECOND, REAL_SECONDS_PER_WORKDAY, createInitialState, ensureMasterSchedule, scheduledTasksForDay, shiftMasterScheduleTask } from '../game-core.js';
+import { createPersonProfile, createVisualProfile, generateAmbientBeat, generateSiteLine } from '../procedural-content.js';
+import { GAME_HOURS_PER_REAL_SECOND, REAL_SECONDS_PER_WORKDAY, createInitialState, ensureMasterSchedule, scheduledTasksForDay, shiftMasterScheduleTask, updateAmbientActivity } from '../game-core.js';
 import { allRandomEvents } from '../events/index.js';
 
 test('order market is deterministic and guarantees broad project variety', () => {
@@ -28,6 +28,24 @@ test('site chatter is combinatorial rather than a two-line loop', () => {
   const lines=new Set(Array.from({length:600},(_,index)=>generateSiteLine(['management','moving','paint','electric','furniture','cleaning'][index%6],index)));
   assert.ok(lines.size>=120);
   assert.ok([...lines].some(line=>line.includes('###@!#!!')));
+});
+
+test('ambient activity is contextual, finite and separate from major incidents', () => {
+  const generated=generateAmbientBeat('electric',17);
+  assert.equal(generated.skill,'electric');
+  assert.ok(generated.text.length>20);
+  const state=createInitialState(makeSeededRng(31),allRandomEvents);
+  state.started=true;
+  state.elapsed=1;
+  state.nextAmbientBeatAt=0;
+  state.crews.push({id:'sparkies',name:'Искра',skill:'electric',taskId:'electric',unavailableUntil:0});
+  const beat=updateAmbientActivity(state);
+  assert.equal(beat.skill,'electric');
+  assert.equal(beat.crewId,'sparkies');
+  assert.equal(state.eventQueue.length,0);
+  state.elapsed=beat.expiresAt+.01;
+  state.nextAmbientBeatAt=state.elapsed+1;
+  assert.equal(updateAmbientActivity(state),null);
 });
 
 test('a mission samples many incidents and spreads them across workdays', () => {
