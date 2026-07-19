@@ -14,7 +14,7 @@
       <header class="topbar">
         <div class="brand" aria-label="FITOUT">
           <span class="brand-mark">F</span>
-          <span class="brand-copy"><strong>FITOUT</strong><small>технический заказчик · v0.0.7</small></span>
+          <span class="brand-copy"><strong>FITOUT</strong><small>технический заказчик · v0.0.8</small></span>
         </div>
 
         <div class="mission-label">
@@ -34,6 +34,7 @@
           <button class="icon-button" id="pauseButton" title="Пауза" aria-label="Пауза">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg>
           </button>
+          <button class="end-day-button" id="endDayButton" type="button" title="Закончить день и открыть отчёт"><span>↧</span><b>ДЕНЬ</b></button>
           <div class="speed-picker" role="group" aria-label="Скорость">
             <button class="active" data-speed="1">1×</button>
             <button data-speed="2">2×</button>
@@ -91,7 +92,6 @@
             <div class="live-chip"><i></i><span id="siteStatus">Объект принят</span></div>
             <div class="live-chip activity-chip" id="siteBeat" hidden aria-live="polite"><i></i><span id="siteBeatText">На объекте что-то происходит</span></div>
             <div class="view-actions">
-              <button class="site-pause-button" id="sitePauseButton" title="Пауза на объекте" aria-label="Пауза на объекте">Ⅱ <span>ПАУЗА</span></button>
               <button id="soundToggle" title="Звук" aria-label="Включить или выключить звук">♪</button>
               <button id="zoomOut" title="Уменьшить" aria-label="Уменьшить">−</button>
               <button id="zoomReset" title="Вернуть масштаб" aria-label="Вернуть масштаб">
@@ -119,18 +119,23 @@
           <nav class="management-menu" aria-label="Каналы управления объектом">
             <button class="management-card whatsapp" id="siteWhatsappButton" type="button"><span class="management-icon">◉</span><span><strong>Чат стройки</strong><small>Сделать срочно · уточнить статус</small></span><b>→</b></button>
             <button class="management-card outlook" id="siteEmailButton" type="button"><span class="management-icon">✉</span><span><strong>Почта</strong><small>Резерв · решение · претензия</small></span><b>→</b></button>
-            <button class="management-card team" id="teamButton" type="button"><span class="management-icon">♟</span><span><strong>Команда</strong><small>Свои люди и подрядчики</small></span><b>→</b></button>
+            <button class="management-card team" id="teamButton" type="button"><span class="management-icon">♟</span><span><strong>Команда</strong><small>Свои люди, подрядчики и переброска</small></span><b id="crewCount">2 на объекте →</b></button>
             <div class="management-tools">
               <button id="financeButton" type="button"><span>₽</span>Деньги</button>
               <button id="docsButton" type="button"><span>▤</span>Документы</button>
               <button class="save-exit-button" id="saveExitButton" type="button"><span>↙</span>Сохранить и выйти в меню</button>
             </div>
           </nav>
+          <section class="situation-inbox" aria-labelledby="situationInboxTitle">
+            <div class="situation-inbox-heading">
+              <div><span class="eyebrow">ЖИВОЙ ОБЪЕКТ</span><h3 id="situationInboxTitle">Вопросы с площадки</h3></div>
+              <span class="counter" id="situationCount">0</span>
+            </div>
+            <p class="situation-inbox-empty" id="situationInboxEmpty">Пока никто не требует решить судьбу одной розетки.</p>
+            <div class="situation-inbox-list" id="situationInbox"></div>
+          </section>
           <div class="contractor-list" id="contractorList" hidden></div>
-          <div class="crew-section">
-            <div class="subheading"><span>СЕЙЧАС НА ОБЪЕКТЕ</span><strong id="crewCount">1 человек</strong></div>
-            <div class="crew-list" id="crewList"></div>
-          </div>
+          <div class="crew-list" id="crewList" hidden></div>
         </aside>
       </main>
 
@@ -173,8 +178,10 @@
 
     <div class="modal-backdrop" id="mainMenuModal" role="dialog" aria-modal="true" aria-labelledby="mainMenuTitle">
       <section class="main-menu-modal">
-        <div class="main-menu-art" aria-hidden="true">
+        <div class="main-menu-art hq-menu-scene" aria-hidden="true">
+          <canvas id="hqCanvas"></canvas>
           <div class="auth-cover-title"><span>F</span><strong>FITOUT<br>SIMULATOR</strong><small>Офис должен открыться в понедельник</small></div>
+          <div class="hq-scene-caption"><span>ВАШ ШТАБ · УРОВЕНЬ <b id="hqSceneLevel">0</b></span><strong id="hqSceneTitle">Стол у принтера</strong><small id="hqSceneStatus">Клиентам строим лучше, чем себе.</small></div>
         </div>
         <div class="main-menu-actions">
           <span class="eyebrow">ПРОФИЛЬ <b id="menuProfileName">ИГРОК</b></span>
@@ -182,12 +189,13 @@
           <p id="continueSummary">Сохранённого объекта пока нет. Это самый спокойный момент вашей карьеры.</p>
           <section class="organization-card" aria-label="Экономика организации">
             <header><span><small>ВАША ОРГАНИЗАЦИЯ</small><strong id="organizationName">ООО «Потом согласуем»</strong></span><b id="organizationCash">320 000 ₽</b></header>
-            <div class="organization-metrics"><span><small>ДОЛГ</small><b id="organizationDebt">0 ₽</b></span><span><small>ПРОЕКТЫ</small><b id="organizationProjects">0</b></span><span><small>РЕПУТАЦИЯ</small><b id="organizationReputation">50</b></span></div>
-            <div class="loan-actions"><span>Не хватает оборотки?</span><button type="button" data-loan="300">Кредит 300К · 16%</button><button type="button" data-loan="800">Кредит 800К · 22%</button></div>
+            <div class="organization-metrics"><span><small>УРОВЕНЬ</small><b id="organizationLevel">1</b></span><span><small>ДОЛГ</small><b id="organizationDebt">0 ₽</b></span><span><small>ПРОЕКТЫ</small><b id="organizationProjects">0</b></span><span><small>РЕПУТАЦИЯ</small><b id="organizationReputation">50</b></span></div>
+            <div class="loan-actions"><span>В кассу организации</span><button type="button" data-loan="300" data-loan-recipient="organization">300К · 28К/мес</button><button type="button" data-loan="800" data-loan-recipient="organization">800К · 53К/мес</button></div>
           </section>
           <section class="hq-menu-card" aria-label="Собственный офис">
             <span><small>СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ <b id="hqLevel">0</b></small><strong id="hqTitle">Стол у принтера</strong><em id="hqStatus">Клиентам строим лучше, чем себе.</em></span>
             <button type="button" id="developHqButton">Попытаться улучшить · <b id="hqCost">80К</b></button>
+            <div class="avatar-customizer"><small>ВАШ АВАТАР</small><div><button type="button" data-avatar-color="#ddff55" title="Лайм">●</button><button type="button" data-avatar-color="#69bfe8" title="Синий">●</button><button type="button" data-avatar-color="#d87561" title="Коралловый">●</button><button type="button" data-avatar-outfit="vest">Жилет</button><button type="button" data-avatar-outfit="suit">Костюм</button><button type="button" data-avatar-helmet="classic">Каска</button><button type="button" data-avatar-helmet="visor">Визор</button><button type="button" data-avatar-helmet="cap">Кепка</button></div></div>
           </section>
           <nav class="source-links" aria-label="Материалы об офисах"><a href="https://www.youtube.com/@Olsedmi" target="_blank" rel="noreferrer">▶ YouTube · Офисная среда</a><a href="https://t.me/all_about_offices" target="_blank" rel="noreferrer">➤ Telegram · Всё об офисах</a></nav>
           <button class="primary-button menu-button" id="continueGameButton" type="button"><span><b>Продолжить</b><small>Вернуться на текущий объект</small></span><strong>→</strong></button>
@@ -271,7 +279,9 @@
           <div id="teamPicker" class="team-picker"></div>
           <div class="subheading"><span>ПОДРЯДЧИКИ</span><strong>выход на объект</strong></div>
           <div id="mapContractors" class="map-contractors"></div>
-          <button class="primary-button hero-button" id="enterSite">Выйти на объект <span>→</span></button>
+          <section class="prep-finance"><span><small>ДОСТУПНО: АВАНС + КАССА КОМПАНИИ</small><strong id="prepCombinedFunds">0 ₽</strong></span><button type="button" data-loan="300" data-loan-recipient="project">Кредит 300К на объект</button><button type="button" data-loan="800" data-loan-recipient="project">Кредит 800К на объект</button></section>
+          <div class="prep-confirm"><button class="secondary-button" id="confirmPreparationButton">Подтвердить выбранный состав</button><small id="prepConfirmStatus">Состав можно менять и отзывать без штрафа.</small></div>
+          <div class="prep-exit-actions"><button class="secondary-button" id="cancelPreparationButton">Отказаться и вернуться к заказам</button><button class="primary-button hero-button" id="enterSite" disabled>Выйти на объект <span>→</span></button></div>
         </div>
       </section>
     </div>
@@ -313,6 +323,7 @@
         <p>Сначала проверьте план/факт. Затем отправьте таблицу, настолько большую, чтобы никто не решился её оспаривать.</p>
         <div class="excel-toolbar"><span>Файл</span><span>Главная</span><span>Вставка</span><span>Формулы</span><span>Данные</span><b>Σ АВТОСУММА</b></div>
         <div class="excel-sheet"><table><thead><tr><th>№</th><th>WBS</th><th>Работа / микроподзадача</th><th>План, ч</th><th>Факт, ч</th><th>Δ</th><th>Статус</th><th>Ответственный</th><th>Комментарий</th></tr></thead><tbody id="reportRows"></tbody></table></div>
+        <section class="evening-schedule" id="eveningScheduleDecision"></section>
         <div class="report-footer"><span id="reportSummary"></span><button class="primary-button" id="sendReport">Отправить «ОТЧЁТ_финал_v7_точно.xlsx»</button></div>
       </section>
     </div>
@@ -331,7 +342,7 @@
         <button class="modal-close" data-close-sidebook aria-label="Закрыть">×</button>
         <span class="eyebrow">ДЕНЕЖНЫЙ ПОТОК</span><h2 id="financeTitle">Платить приходится сегодня</h2>
         <p>Заказчик платит аванс и этапы. Вы платите материалы, мобилизацию, зарплаты и ежедневное существование объекта.</p>
-        <div class="finance-kpis" id="financeKpis"></div><div class="cash-ledger" id="cashLedger"></div>
+        <div class="finance-kpis" id="financeKpis"></div><section class="finance-loans" id="financeLoans"></section><div class="cash-ledger" id="cashLedger"></div>
       </section>
     </div>
 

@@ -52,11 +52,12 @@ test('a mission samples many incidents and spreads them across workdays', () => 
   const state=createInitialState(makeSeededRng(91),allRandomEvents);
   assert.equal(state.randomEvents.length,12);
   assert.equal(new Set(state.randomEvents).size,12);
-  assert.ok(state.eventSchedule.every(event=>event.probability>=.32&&event.probability<=.82));
+  assert.ok(state.eventSchedule.every(event=>event.probability>=.42&&event.probability<=.9));
   assert.ok(state.eventSchedule.some(event=>!event.occurs));
   const counts=new Map();
   for(const event of state.eventSchedule){const day=Math.floor(event.hour/24);counts.set(day,(counts.get(day)??0)+1);}
-  assert.ok([...counts.values()].every(count=>count<=2));
+  assert.ok([...counts.values()].every(count=>count<=5));
+  assert.ok(state.randomEvents.some(id=>allRandomEvents.find(event=>event.id===id)?.beneficial));
 });
 
 test('one workday is five real minutes', () => {

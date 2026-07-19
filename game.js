@@ -7,11 +7,16 @@ import {
   applyCatalogEventChoice,
   applyContractCard,
   attemptHqUpgrade,
+  captureMasterSchedule,
   closeDayFinances,
   createInitialState,
   cyclePriority,
   developHeadquarters,
+  dismissContractor,
   ensureOrganization,
+  ensureRuntimeCrews,
+  ensureWorkforceMarket,
+  forceAssignCrew,
   getResult,
   getRisk,
   hireContractor,
@@ -19,13 +24,20 @@ import {
   ensureMasterSchedule,
   moveMasterScheduleTask,
   restoreState,
+  requestClientFunding,
   resolveSituation,
+  resolveScheduleRevision,
   scheduledTasksForDay,
   selectOrder,
   serializeState,
   shiftMasterScheduleTask,
+  sendPressureInstruction,
+  sendContractorEscalation,
+  submitTaskForAcceptance,
   takeOrganizationLoan,
   tickState,
+  unhireContractor,
+  unhireTeamMember,
   unlockTasks,
 } from './game-core.js';
 import { allRandomEvents, randomEventById } from './events/index.js';
@@ -37,8 +49,8 @@ const STORAGE_KEY = 'fitout-mission-v4';
 const ICONS = {
   survey: '⌁', project:'⌑', move: '↔', electric: 'ϟ', prep: '▧', paint: '◩', desks: '▤', clean: '✦', 'executive-docs':'▥', inspect: '✓',
 };
-const SKILL_LABELS = { management: 'Прораб', design:'Проектирование', documentation:'Исполнительная', support:'Команда', moving: 'Перестановка', paint: 'Отделка', electric: 'Электрика', furniture: 'Мебель', cleaning: 'Клининг' };
-const STATUS_LABELS = { locked: 'Ждёт зависимости', ready: 'Можно начинать', active: 'В работе', done: 'Завершено', blocked: 'Нет бюджета' };
+const SKILL_LABELS = { management: 'Прораб', general:'Универсальная хозбригада', design:'Проектирование', documentation:'Исполнительная', support:'Команда', moving: 'Перестановка', paint: 'Отделка', electric: 'Электрика', furniture: 'Мебель', cleaning: 'Клининг' };
+const STATUS_LABELS = { locked: 'Ждёт зависимости', ready: 'Можно начинать', active: 'В работе', awaiting:'Готово к предъявлению', done: 'Принято', blocked: 'Нет бюджета' };
 const PERSON_NAMES = {
   foreman:['Илья Петрович'],moving:['Рустам','Вадим'],paint:['Саша','Николай'],electric:['Денис','Тимур'],furniture:['Женя','Павел'],cleaning:['Лена','Марина'],
   architect:['Мария Корнилова'],client:['Анна Крылова'],police:['Капитан Орлов','Сержант Лебедев'],inspector:['Инспектор Семёнов'],medic:['Фельдшер Вера'],boss:['Виктор Аркадьевич'],delivery:['Водитель Гена'],worker:['Алексей','Марат','Сергей'],
@@ -56,6 +68,8 @@ const CONTRACT_CARDS=[
   {id:'buffer',title:'Защитить срок',note:'+8 часов · обещаем ежедневный план/факт',deadline:8,trust:-3},
   {id:'acceptance',title:'Снизить планку',note:'качество −5 · доверие −6',quality:-5,trust:-6},
   {id:'transparent',title:'Прозрачная смета',note:'+55 тыс. ₽ · качество +2 · срок +3 ч',budget:55,quality:2,deadline:3,trust:2},
+  {id:'audit',title:'Добровольный аудит',note:'доверие +3 · цена и срок без изменений',trust:3},
+  {id:'protocol',title:'Особое мнение в протокол',note:'качество +1 · доверие −1',quality:1,trust:-1},
 ];
 const EVENT_COPY = {
   'paint-change': {
@@ -131,12 +145,23 @@ if(!Array.isArray(state.randomEvents)||state.randomEvents.length<12||!Array.isAr
   state.randomEvent=state.randomEvents[0];
 }
 unlockTasks(state);
+function decorateOrder(order) {
+  if(!order)return order;
+  const campaignLevels={1:1,2:2,3:4,4:6};
+  const requiredLevel=order.requiredLevel??(order.campaign?(campaignLevels[order.chapter]??1):Math.max(1,Math.min(7,order.complexity)));
+  const fixedContract=order.fixedContract??order.clientType==='state';
+  const occupiedOffice=order.occupiedOffice??(!order.tutorial&&['refresh','restack','renovation'].includes(order.projectType)&&requiredLevel>=2);
+  const startWithoutProject=order.startWithoutProject??(!order.tutorial&&requiredLevel>=4&&['shell','greenfield'].includes(order.projectType));
+  const eventIntensity=order.eventIntensity??Math.min(1.55,1+(requiredLevel-1)*.09);
+  const extraRisks=[occupiedOffice?'офис продолжает работать внутри стройки':null,startWithoutProject?'работы стартуют до выпуска финального РД':null,fixedContract?'фиксированные цена и срок: самодеятельность проверяют буквально':null].filter(Boolean);
+  return {...order,requiredLevel,fixedContract,occupiedOffice,startWithoutProject,eventIntensity,riskTags:[...(order.riskTags??[]),...extraRisks].filter((risk,index,list)=>list.indexOf(risk)===index)};
+}
 function createOrderMarket(organization=ensureOrganization(state)) {
   const campaign=createCampaignOrders();
   const random=generateOrders(Math.random,5).map(order=>({...order,requiresProjects:Math.max(0,Math.min(2,Math.floor(order.complexity/2)-1))}));
-  return [...campaign,...random];
+  return [...campaign,...random].map(decorateOrder);
 }
-let orders = Array.isArray(state.orderOptions) && state.orderOptions.length ? state.orderOptions : createOrderMarket();
+let orders = Array.isArray(state.orderOptions) && state.orderOptions.length ? state.orderOptions.map(decorateOrder) : createOrderMarket();
 state.orderOptions = orders;
 let selectedOrderId = state.selectedOrder?.id ?? orders[0]?.id;
 let visualProfile = createVisualProfile(state.visualSeed ?? 1, state.selectedOrder);
@@ -149,6 +174,10 @@ let resultShown = false;
 let selectedPerson = null;
 let communicationWasPaused = true;
 let selectedEmailTemplate = 'client';
+let eveningScheduleSnapshot=null;
+let eveningScheduleDay=-1;
+let eveningEditing=false;
+let selectedScheduleRoute=null;
 let audioEnabled=true;
 let audioContext=null;
 let cameraKick=0;
@@ -156,15 +185,18 @@ let cameraKick=0;
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value='') => String(value).replace(/[&<>'"]/g,(character)=>({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[character]));
 const refs = {
-  canvas: $('#siteCanvas'), taskList: $('#taskList'), contractorList: $('#contractorList'), crewList: $('#crewList'),
+  canvas: $('#siteCanvas'), hqCanvas:$('#hqCanvas'), taskList: $('#taskList'), contractorList: $('#contractorList'), crewList: $('#crewList'),
   budget: $('#budgetValue'), budgetDelta: $('#budgetDelta'), deadline: $('#deadlineValue'), deadlineStatus: $('#deadlineStatus'),
   quality: $('#qualityValue'), qualityBar: $('#qualityBar'), trust: $('#trustValue'), day: $('#dayLabel'), time: $('#timeLabel'),
   counter: $('#taskCounter'), progress: $('#missionProgress'), crewCount: $('#crewCount'), risk: $('#riskLine'), siteStatus: $('#siteStatus'),
+  situationInbox:$('#situationInbox'), situationCount:$('#situationCount'), situationInboxEmpty:$('#situationInboxEmpty'),
   selection: $('#selectionCard'), toasts: $('#toastStack'), brief: $('#briefModal'), event: $('#eventModal'), result: $('#resultModal'),
   auth:$('#authModal'),menu:$('#mainMenuModal'),orders:$('#ordersModal'),market:$('#marketModal'),schedule:$('#scheduleModal'),planning:$('#planningModal'),communication:$('#communicationModal'),report:$('#reportModal'),team:$('#teamModal'),finance:$('#financeModal'),docs:$('#docsModal'),situation:$('#situationModal'),
 };
 let openSituationId=null;
 let scheduleWasPaused=true;
+let renderedSituationSignature='';
+let situationWasPaused=false;
 
 const profileStorageKey=(name)=>`${STORAGE_KEY}:${encodeURIComponent((name??'guest').toLowerCase())}`;
 
@@ -195,15 +227,19 @@ function installPlayerState(rawState) {
   const loaded=rawState?(typeof rawState==='string'?restoreState(rawState):restoreState(JSON.stringify(rawState))):null;
   saved=loaded&&!loaded.completed?loaded:null;
   state=saved??createInitialState(Math.random,allRandomEvents);
-  if(!saved&&loaded?.organization){state.organization=loaded.organization;state.hq=loaded.hq??state.hq;}
+  if(!saved&&loaded?.organization){state.organization=loaded.organization;state.hq=loaded.hq??state.hq;state.playerAvatar=loaded.playerAvatar??state.playerAvatar;}
   ensureOrganization(state);
+  ensureRuntimeCrews(state);
+  ensureWorkforceMarket(state);
   ensureMasterSchedule(state);
-  if(!Array.isArray(state.randomEvents)||state.randomEvents.length<12||!Array.isArray(state.eventSchedule)||state.randomEvents.some(id=>!randomEventById.has(id))) {
-    const refreshedEvents=createInitialState(Math.random,allRandomEvents);state.randomEvents=refreshedEvents.randomEvents;state.eventSchedule=refreshedEvents.eventSchedule;state.randomEvent=state.randomEvents[0];
+  if(state.selectedOrder)state.selectedOrder=decorateOrder(state.selectedOrder);
+  if(!Array.isArray(state.randomEvents)||state.randomEvents.length<12||!Array.isArray(state.eventSchedule)||state.randomEvents.some(id=>!randomEventById.has(id))||state.eventSchedule.some(item=>(item.probability??0)<.42)) {
+    const refreshedEvents=createInitialState(Math.random,allRandomEvents);const currentDay=Math.floor((state.elapsed??0)/24)*24;state.randomEvents=refreshedEvents.randomEvents;state.eventSchedule=refreshedEvents.eventSchedule.map(item=>({...item,hour:item.hour+currentDay}));state.randomEvent=state.randomEvents[0];state.nextMajorEventAt=(state.elapsed??0)+.65;
   }
-  orders=Array.isArray(state.orderOptions)&&state.orderOptions.length?state.orderOptions:createOrderMarket();
+  state.nextSituationAt=Math.min(state.nextSituationAt??state.elapsed+1.35,state.elapsed+1.35);
+  orders=Array.isArray(state.orderOptions)&&state.orderOptions.length?state.orderOptions.map(decorateOrder):createOrderMarket();
   state.orderOptions=orders;selectedOrderId=state.selectedOrder?.id??orders[0]?.id;
-  visualProfile=createVisualProfile(state.visualSeed??1,state.selectedOrder);unlockTasks(state);rebuildTaskMarkers();
+  visualProfile=createVisualProfile(state.visualSeed??1,state.selectedOrder);unlockTasks(state);clearCrewMeshes();rebuildTaskMarkers();
   renderedLogLength=state.log.length;resultShown=false;selectedPerson=null;
 }
 
@@ -218,13 +254,20 @@ function renderMainMenu() {
   } else $('#continueSummary').textContent='Сохранённого объекта пока нет. Это самый спокойный момент вашей карьеры.';
   $('#organizationName').textContent=organization.name;
   $('#organizationCash').textContent=money(organization.cash);
+  $('#organizationLevel').textContent=`${organization.playerLevel} · ${organization.playerXp} XP`;
   $('#organizationDebt').textContent=money(organization.debt);
+  $('#organizationDebt').title=organization.loans.length?`${organization.loans.length} договоров · просрочка ${money(organization.arrears??0)}`:'Кредитов нет';
   $('#organizationProjects').textContent=String(organization.projectsCompleted);
   $('#organizationReputation').textContent=`${organization.reputation} / 100`;
   const hqCosts=[80,170,320,520];const hqCost=hqCosts[Math.min(state.hq?.level??0,hqCosts.length-1)];
   $('#hqLevel').textContent=String(state.hq?.level??0);$('#hqTitle').textContent=state.hq?.title??'Стол у принтера';$('#hqStatus').textContent=state.hq?.lastFailure??'Клиентам строим лучше, чем себе.';$('#hqCost').textContent=`${hqCost}К`;
+  $('#hqSceneLevel').textContent=String(state.hq?.level??0);$('#hqSceneTitle').textContent=state.hq?.title??'Стол у принтера';$('#hqSceneStatus').textContent=state.hq?.lastFailure??'Клиентам строим лучше, чем себе.';hqPreviewKey='';
   $('#developHqButton').disabled=organization.cash<hqCost;
-  document.querySelectorAll('[data-loan]').forEach(button=>{button.disabled=state.started&&!state.completed;button.title=button.disabled?'Кредиты доступны только между проектами':'';});
+  const avatar=state.playerAvatar??={color:'#ddff55',outfit:'vest',helmet:'classic'};
+  document.querySelectorAll('[data-avatar-color]').forEach(button=>button.classList.toggle('active',button.dataset.avatarColor===avatar.color));
+  document.querySelectorAll('[data-avatar-outfit]').forEach(button=>button.classList.toggle('active',button.dataset.avatarOutfit===avatar.outfit));
+  document.querySelectorAll('[data-avatar-helmet]').forEach(button=>button.classList.toggle('active',button.dataset.avatarHelmet===avatar.helmet));
+  document.querySelectorAll('[data-loan]').forEach(button=>{button.disabled=organization.debt>=2320;button.title=button.disabled?'Лимит долговой нагрузки исчерпан':'Деньги попадут в текущий проект или в кассу организации';});
 }
 
 function resumePlayerGame() {
@@ -309,14 +352,14 @@ function renderOrders() {
   const selected=orders.find(order=>order.id===selectedOrderId)??orders[0];
   if(!selected)return;
   selectedOrderId=selected.id;
-  const organization=ensureOrganization(state);const locked=(order)=>(order.requiresProjects??0)>organization.projectsCompleted;
+  const organization=ensureOrganization(state);const locked=(order)=>(order.requiresProjects??0)>organization.projectsCompleted||(order.requiredLevel??1)>organization.playerLevel;
   $('#orderPins').innerHTML=orders.map((order,index)=>`<button class="order-pin ${order.id===selected.id?'selected':''} ${locked(order)?'locked':''}" style="left:${order.mapX}%;top:${order.mapY}%;--pin:${order.color}" data-order-id="${order.id}" data-label="${order.location} · ${order.finishClass}"><span>${order.tutorial?'У':order.clientType==='state'?'Г':'₽'}${index+1}</span></button>`).join('');
   $('#orderDetails').innerHTML=`<h2>${selected.title}</h2><span class="order-location">${selected.location} · ${selected.area.toLocaleString('ru-RU')} м²</span>
-    <div class="order-badges">${selected.tutorial?'<span>ОБУЧЕНИЕ</span>':''}${selected.campaign?`<span>ГЛАВА ${selected.chapter}</span>`:''}<span class="${selected.clientType==='state'?'state':''}">${selected.clientType==='state'?'государство':'коммерция'}</span><span>${selected.projectTypeLabel}</span><span>класс ${selected.finishClass}</span><span>сложность ${'◆'.repeat(selected.complexity)}</span></div>
+    <div class="order-badges">${selected.tutorial?'<span>ОБУЧЕНИЕ</span>':''}${selected.campaign?`<span>ГЛАВА ${selected.chapter}</span>`:''}<span>УРОВЕНЬ ${selected.requiredLevel}</span><span class="${selected.clientType==='state'?'state':''}">${selected.clientType==='state'?'государство':'коммерция'}</span><span>${selected.projectTypeLabel}</span><span>класс ${selected.finishClass}</span><span>сложность ${'◆'.repeat(selected.complexity)}</span></div>
     <div class="order-metrics"><div><small>СТАРТОВЫЙ БЮДЖЕТ</small><strong>${money(selected.budget)}</strong></div><div><small>СРОК</small><strong>${selected.deadlineHours} ч</strong></div><div><small>КАЧЕСТВО</small><strong>≥ ${selected.qualityTarget}</strong></div><div><small>ЗАКУПКА</small><strong>${selected.procurement}</strong></div></div>
     <div class="order-client"><strong>${selected.clientName}</strong><small>${selected.clientPerson} · ${selected.clientRole}<br>${selected.clientType==='state'?'Решение считается принятым, когда его приняли все отсутствующие.':'Хочет быстро, качественно и чтобы резерв не использовался.'}</small></div>
-    <ul class="order-risks">${locked(selected)?`<li>Нужно закрыть проектов: ${selected.requiresProjects}. Сейчас: ${organization.projectsCompleted}.</li>`:''}${selected.riskTags.map(risk=>`<li>${risk}</li>`).join('')}</ul>`;
-  $('#acceptOrder').disabled=locked(selected);$('#acceptOrder').innerHTML=locked(selected)?`Сначала закрыть ${selected.requiresProjects} проект(а)`:'Вести переговоры <span>→</span>';
+    <ul class="order-risks">${(selected.requiredLevel??1)>organization.playerLevel?`<li>Нужен уровень ${selected.requiredLevel}. Сейчас: ${organization.playerLevel}.</li>`:''}${(selected.requiresProjects??0)>organization.projectsCompleted?`<li>Нужно закрыть проектов: ${selected.requiresProjects}. Сейчас: ${organization.projectsCompleted}.</li>`:''}${selected.riskTags.map(risk=>`<li>${risk}</li>`).join('')}</ul>`;
+  $('#acceptOrder').disabled=locked(selected);$('#acceptOrder').innerHTML=locked(selected)?'Недостаточно опыта организации':'Вести переговоры <span>→</span>';
 }
 
 function updateMissionCopy() {
@@ -338,15 +381,17 @@ function renderNegotiation() {
   $('#contractDeadline').textContent=`${state.contract.deadlineHours} часов`;
   $('#contractQuality').textContent=`не ниже ${state.contract.qualityTarget}`;
   $('#cardsPlayed').textContent=`${state.contract.cardsPlayed.length} / 2`;
-  $('#contractDeck').innerHTML=CONTRACT_CARDS.map(card=>`<button class="contract-card ${state.contract.cardsPlayed.includes(card.id)?'played':''}" data-contract-card="${card.id}" ${state.contract.cardsPlayed.includes(card.id)?'disabled':''}><strong>${card.title}</strong><small>${card.note}</small></button>`).join('');
+  $('#contractDeck').innerHTML=CONTRACT_CARDS.map(card=>{const fixedBlocked=state.selectedOrder?.fixedContract&&((card.budget??0)!==0||(card.deadline??0)!==0);return `<button class="contract-card ${state.contract.cardsPlayed.includes(card.id)?'played':''}" data-contract-card="${card.id}" ${state.contract.cardsPlayed.includes(card.id)||fixedBlocked?'disabled':''}><strong>${card.title}</strong><small>${fixedBlocked?'ГОСКОНТРАКТ: цену и срок менять нельзя':card.note}</small></button>`;}).join('');
   const ready=state.contract.cardsPlayed.length===2;$('#startMission').disabled=!ready;$('#startMission').innerHTML=ready?'Подписать и искать команду <span>→</span>':'Сначала договоритесь <span>→</span>';
 }
 
 function renderPreparation() {
-  $('#prepBudget').textContent=money(state.budget);
-  $('#mapGrid').innerHTML=state.contractors.map(contractor=>`<span class="map-node" style="--node:${contractor.color}">${contractor.initials}<small>${contractor.company}</small></span>`).join('');
-  $('#teamPicker').innerHTML=state.team.map(member=>`<article class="prep-card"><span class="contractor-avatar" style="--crew-color:${member.color}">${member.initials}</span><span><strong>${member.name}</strong><small>${member.role} · ${member.effect}</small></span><button class="hire-button" data-team-hire="${member.id}" ${member.hired?'disabled':''}>${member.hired?'В ШТАБЕ':`${member.price}К`}</button></article>`).join('');
-  $('#mapContractors').innerHTML=state.contractors.map(contractor=>`<article class="prep-card"><span class="contractor-avatar" style="--crew-color:${contractor.color}">${contractor.initials}</span><span><strong>${contractor.company}</strong><small>${contractor.name} · ${contractor.quirk}</small></span><button class="hire-button" data-map-hire="${contractor.id}" ${contractor.hired?'disabled':''}>${contractor.hired?'НАНЯТЫ':`${contractor.price}К`}</button></article>`).join('');
+  const organization=ensureOrganization(state);$('#prepBudget').textContent=money(state.budget);
+  $('#prepCombinedFunds').textContent=money(state.budget+organization.cash);
+  $('#mapGrid').innerHTML=state.contractors.filter(contractor=>contractor.contractClass==='standard').map(contractor=>`<span class="map-node" style="--node:${contractor.color}">${contractor.initials}<small>${contractor.company}</small></span>`).join('');
+  $('#teamPicker').innerHTML=state.team.map(member=>`<article class="prep-card"><span class="contractor-avatar" style="--crew-color:${member.color}">${member.initials}</span><span><strong>${member.name} · ур. ${member.level??1}</strong><small>${member.role} · ${member.effect}</small></span><button class="hire-button ${member.hired?'revoke':''}" ${member.hired?`data-team-unhire="${member.id}"`:`data-team-hire="${member.id}"`}>${member.hired?'ОТОЗВАТЬ':`${member.price}К`}</button></article>`).join('');
+  $('#mapContractors').innerHTML=state.contractors.map(contractor=>`<article class="prep-card"><span class="contractor-avatar" style="--crew-color:${contractor.color}">${contractor.initials}</span><span><strong>${contractor.company} · ур. ${contractor.level??1}</strong><small>${contractor.classLabel} · ${contractor.name} · темп ${Math.round(contractor.speed*100)}% · качество ${Math.round(contractor.quality*100)}%</small></span><button class="hire-button ${contractor.hired?'revoke':''}" ${contractor.hired?`data-map-unhire="${contractor.id}"`:`data-map-hire="${contractor.id}"`}>${contractor.hired?'ОТОЗВАТЬ':`${contractor.price}К`}</button></article>`).join('');
+  $('#confirmPreparationButton').textContent=state.preparationConfirmed?'Состав подтверждён ✓':'Подтвердить выбранный состав';$('#confirmPreparationButton').disabled=Boolean(state.preparationConfirmed);$('#enterSite').disabled=!state.preparationConfirmed;$('#prepConfirmStatus').textContent=state.preparationConfirmed?'Выход на объект разблокирован. Любое изменение снова откроет черновик.':'Состав можно менять и отзывать без штрафа.';
 }
 
 function renderDayPlan() {
@@ -381,11 +426,14 @@ function renderMasterSchedule() {
 
 function openMasterSchedule() {
   if(!state.selectedOrder){showToast('Сначала выберите заказ.');return;}
+  $('#scheduleTitle').textContent=eveningEditing?'Вечерняя корректировка графика':'Общий график строительства';
+  $('#acceptSchedule').textContent=eveningEditing?'Зафиксировать изменения →':'Принять общий график →';
   scheduleWasPaused=state.paused;state.paused=true;renderMasterSchedule();refs.schedule.classList.add('visible');
 }
 
 function closeMasterSchedule() {
   refs.schedule.classList.remove('visible');
+  if(eveningEditing){eveningEditing=false;renderEveningScheduleDecision();refs.report.classList.add('visible');return;}
   if(state.started)state.paused=scheduleWasPaused;else refs.market.classList.add('visible');
 }
 
@@ -396,7 +444,7 @@ function projectTime(hourOffset=0) {
 }
 
 function renderWhatsapp() {
-  const pending=state.tasks.filter(task=>!['done','active'].includes(task.status));
+  const pending=state.tasks.filter(task=>!['done','active','awaiting'].includes(task.status));
   const recent=(state.log??[]).slice(-4).map((item,index)=>({name:index%2?'Прораб':'Алина · РП',text:item.text,time:projectTime(-.18*(4-index))}));
   const base=[
     {name:'Прораб',text:'Доброе утро. Закрепил план, пока никто его не отменил.',time:'09:04'},
@@ -415,13 +463,15 @@ function renderWhatsapp() {
 
 const EMAIL_TEMPLATES={
   client:{to:'Арсений Грачёв · заказчик',cc:'Мария Корнилова; Алина Ветрова',subject:'Требуется решение по объекту',body:'Коллеги, просим подтвердить решение по приложенному листу вопросов. До получения ответа работы выполняются по последней согласованной версии.',effect:'+2 доверие · +1 час на переписку',attachment:'Лист_вопросов_к_заказчику_v5.pdf'},
+  clientMoney:{to:'Арсений Грачёв · заказчик',cc:'Финансовый директор; Алина Ветрова',subject:'Запрос дополнительного финансирования',body:'В связи с фактическим прогрессом и уточнением объёмов просим согласовать дополнительный резерв. Актуальный прогноз до завершения и подтверждающие документы приложены.',effect:'шанс зависит от прогресса и доверия · 1 запрос в день',attachment:'Прогноз_ДДС_и_обоснование_v11.xlsx'},
   boss:{to:'Виктор Аркадьевич · руководство',cc:'Финансовый директор; PMO',subject:'Запрос дополнительного резерва',body:'В связи с уточнением объёмов просим открыть резерв проекта. План корректирующих мероприятий и прогноз до завершения приложены.',effect:'+20 тыс. ₽ · −2 доверие',attachment:'Прогноз_денег_финал_v3.xlsx'},
-  contractors:{to:'Руководители подрядных организаций',cc:'Технический надзор; Юридический отдел',subject:'Претензия по качеству и срокам работ',body:'Настоящим фиксируем отставание и замечания к качеству. Просим предоставить корректирующий план и устранить нарушения в установленный срок.',effect:'+1 качество · −10 тыс. ₽',attachment:'Фотофиксация_замечаний.zip'},
+  contractors:{to:'Руководители подрядных организаций',cc:'Технический надзор; Юридический отдел',subject:'ПРЕТЕНЗИЯ: немедленно устранить отставание',body:'Настоящим фиксируем критическое отставание. Требуем немедленно усилить выбранный фронт, предоставить корректирующий план и подтвердить персональную ответственность.',effect:'90% на сильное ускорение · 1 раз в день · −10 тыс. ₽',attachment:'Фотофиксация_и_таблица_ответственных.zip'},
 };
 
 function renderEmailComposer(templateId=selectedEmailTemplate) {
   selectedEmailTemplate=templateId;const template=EMAIL_TEMPLATES[templateId];
-  $('#communicationActions').innerHTML=`<div class="mail-shell"><div class="mail-ribbon"><strong>Новое сообщение</strong><span>Файл</span><span>Сообщение</span><span>Вставка</span><span>Параметры</span></div><div class="mail-workspace"><nav class="mail-templates"><span>ШАБЛОН ПИСЬМА</span>${Object.entries(EMAIL_TEMPLATES).map(([id,item])=>`<button class="${id===templateId?'active':''}" data-email-template="${id}">${id==='client'?'Запросить решение':id==='boss'?'Запросить резерв':'Выставить претензию'}<small>${item.effect}</small></button>`).join('')}</nav><div class="mail-compose"><label><span>Кому</span><input value="${escapeHtml(template.to)}" readonly></label><label><span>Копия</span><input value="${escapeHtml(template.cc)}" readonly></label><label><span>Тема</span><input value="${escapeHtml(template.subject)}" readonly></label><textarea aria-label="Текст письма">${escapeHtml(template.body)}</textarea><div class="mail-attachment">▧ ${escapeHtml(template.attachment)} <small>248 КБ</small></div><div class="mail-send-row"><button class="mail-send" data-send-email="${templateId}">Отправить</button><span>Последствие: <b>${template.effect}</b></span></div></div></div></div>`;
+  const hiredContractors=state.contractors.filter(item=>item.hired);const taskPicker=templateId==='contractors'?`<label><span>Адресат</span><select id="emailContractorSelect"><option value="all">ВСЕМ подрядчикам · дороже и громче</option>${hiredContractors.map(item=>`<option value="${item.id}">${escapeHtml(item.company)} · ${escapeHtml(item.name)}</option>`).join('')}</select></label>`:'';
+  $('#communicationActions').innerHTML=`<div class="mail-shell"><div class="mail-ribbon"><strong>Новое сообщение</strong><span>Файл</span><span>Сообщение</span><span>Вставка</span><span>Параметры</span></div><div class="mail-workspace"><nav class="mail-templates"><span>ШАБЛОН ПИСЬМА</span>${Object.entries(EMAIL_TEMPLATES).map(([id,item])=>`<button class="${id===templateId?'active':''}" data-email-template="${id}">${id==='client'?'Запросить решение':id==='clientMoney'?'Попросить денег':id==='boss'?'Запросить резерв':'Жёсткая претензия'}<small>${item.effect}</small></button>`).join('')}</nav><div class="mail-compose"><label><span>Кому</span><input value="${escapeHtml(template.to)}" readonly></label><label><span>Копия</span><input value="${escapeHtml(template.cc)}" readonly></label><label><span>Тема</span><input value="${escapeHtml(template.subject)}" readonly></label>${taskPicker}<textarea aria-label="Текст письма">${escapeHtml(template.body)}</textarea><div class="mail-attachment">▧ ${escapeHtml(template.attachment)} <small>248 КБ</small></div><div class="mail-send-row"><button class="mail-send" data-send-email="${templateId}">Отправить</button><span>Последствие: <b>${template.effect}</b></span></div></div></div></div>`;
 }
 
 function closeCommunication() {
@@ -443,6 +493,7 @@ function openCommunication(mode) {
 
 function openReport() {
   if(refs.report.classList.contains('visible'))return;
+  const day=Math.floor(state.elapsed/24);if(eveningScheduleDay!==day){eveningScheduleSnapshot=captureMasterSchedule(state);eveningScheduleDay=day;selectedScheduleRoute=null;}
   const baseRows=[];
   for(let index=0;index<36;index++) {
     const task=state.tasks[index%state.tasks.length];const crew=state.crews.find(item=>item.id===task.crewId);
@@ -451,18 +502,43 @@ function openReport() {
   }
   $('#reportRows').innerHTML=baseRows.join('');
   $('#reportSummary').textContent=`36 строк · ${state.tasks.filter(t=>t.status==='done').length} закрыто · файл весит больше, чем управленческое решение`;
+  renderEveningScheduleDecision();
   refs.report.classList.add('visible');
 }
 
+function renderEveningScheduleDecision() {
+  if(!eveningScheduleSnapshot)return;
+  const before=new Map(eveningScheduleSnapshot.map(item=>[item.id,item]));
+  const changed=state.tasks.filter(task=>{const old=before.get(task.id);return old&&!['done','active','awaiting'].includes(task.status)&&(old.start!==task.plannedStartDay||old.finish!==task.plannedFinishDay||old.order!==task.scheduleOrder);}).length;
+  if(!changed)selectedScheduleRoute=null;
+  $('#eveningScheduleDecision').innerHTML=`<div><span>ВЕЧЕРНЕЕ РЕШЕНИЕ</span><strong>${changed?`Изменено работ: ${changed}`:'График пока не трогали'}</strong><small>${changed?'Выберите, как легализовать новую версию.':'Можно сдвинуть будущие работы и попробовать выиграть срок.'}</small></div><div class="evening-tools"><button type="button" data-edit-evening-schedule>▦ Поправить график</button><button type="button" data-open-evening-team>♟ Состав / замена</button></div>${changed?`<div class="schedule-route"><button class="${selectedScheduleRoute==='restore'?'selected':''}" data-schedule-route="restore">Отменить правки<small>вернуть базу</small></button><button class="${selectedScheduleRoute==='secret'?'selected':''}" data-schedule-route="secret">Тайком<small>быстро · риск вскрытия</small></button><button class="${selectedScheduleRoute==='client'?'selected':''}" data-schedule-route="client">Через заказчика<small>может не согласовать</small></button></div>`:''}`;
+  $('#sendReport').disabled=changed&&!selectedScheduleRoute;
+}
+
+function assignmentControls(crew) {
+  if(!crew||(crew.unavailableUntil??0)>state.elapsed)return '';
+  const tasks=state.tasks.filter(task=>['ready','locked'].includes(task.status)&&!task.crewId);
+  if(!tasks.length)return '';
+  return `<div class="crew-reassign"><select data-assignment-select="${crew.id}" aria-label="Новый фронт для ${escapeHtml(crew.name)}">${tasks.map(task=>`<option value="${task.id}">${escapeHtml(task.short)} · ${task.skill===crew.skill?'профиль':'не профиль'}</option>`).join('')}</select><button data-force-assign="${crew.id}">Нагнать</button></div>`;
+}
+
 function renderTeamBook() {
-  const teamRows=state.team.map(member=>{const crew=state.crews.find(item=>item.id===`team-${member.id}`)||(member.id==='pm'?state.crews.find(item=>item.id==='foreman'):null);const away=crew&&(crew.unavailableUntil??0)>state.elapsed;return `<article class="book-person"><i style="--person:${member.color}">${member.initials}</i><span><strong>${member.name}</strong><small>${member.role} · ${member.effect}</small></span><b class="${!member.hired||away?'away':''}">${!member.hired?'НЕ НАНЯТ':away?'НЕТ НА ОБЪЕКТЕ':crew?.taskId?'В РАБОТЕ':'НА ОБХОДЕ'}</b></article>`;});
-  const contractorRows=state.contractors.map(item=>{const crew=state.crews.find(crew=>crew.id===`crew-${item.id}`);return `<article class="book-person"><i style="--person:${item.color}">${item.initials}</i><span><strong>${item.company}</strong><small>${item.name} · форма ${item.color} · ${item.quirk}</small></span><b class="${item.hired?'':'away'}">${item.hired?(crew?.taskId?'РАБОТАЕТ':'НА ОБЪЕКТЕ'):'НЕ НАНЯТЫ'}</b></article>`;});
-  $('#teamBook').innerHTML=`<div class="subheading"><span>ВАША КОМАНДА</span><strong>${state.team.filter(item=>item.hired).length}</strong></div>${teamRows.join('')}<div class="subheading" style="margin-top:16px"><span>ПОДРЯДЧИКИ</span><strong>${state.contractors.filter(item=>item.hired).length}</strong></div>${contractorRows.join('')}`;
+  const teamRows=state.team.map(member=>{const crew=state.crews.find(item=>item.id===`team-${member.id}`)||(member.id==='pm'?state.crews.find(item=>item.id==='foreman'):null);const away=crew&&(crew.unavailableUntil??0)>state.elapsed;return `<article class="book-person contractor-book-row"><i style="--person:${member.color}">${member.initials}</i><span><strong>${member.name} · ур. ${member.level??1}</strong><small>${member.role} · ${member.effect}</small></span><div><b class="${!member.hired||away?'away':''}">${!member.hired?'НЕ НАНЯТ':away?'НЕТ НА ОБЪЕКТЕ':crew?.taskId?'В РАБОТЕ':'НА ОБХОДЕ'}</b>${member.hired?assignmentControls(crew):''}</div></article>`;});
+  const hired=state.contractors.filter(item=>item.hired);
+  const contractorRows=hired.map(item=>{const crew=state.crews.find(crew=>crew.id===`crew-${item.id}`);const waiting=crew&&(crew.unavailableUntil??0)>state.elapsed;return `<article class="book-person contractor-book-row"><i style="--person:${item.color}">${item.initials}</i><span><strong>${item.company} · ур. ${item.level??1}</strong><small>${item.classLabel} · ${item.name} · ${item.quirk}</small></span><div><b class="${waiting?'away':''}">${waiting?'ВЫХОД ЗАВТРА':crew?.taskId?'РАБОТАЕТ':'НА ОБЪЕКТЕ'}</b>${assignmentControls(crew)}<button data-dismiss-contractor="${item.id}" ${state.needsReport?'':'disabled'}>Снять вечером</button></div></article>`;}).join('');
+  const replacements=state.contractors.filter(item=>!item.hired).map(item=>`<article class="book-person contractor-book-row"><i style="--person:${item.color}">${item.initials}</i><span><strong>${item.company} · ${item.classLabel}</strong><small>${item.quirk}<br>${item.price}К · темп ${Math.round(item.speed*100)}% · качество ${Math.round(item.quality*100)}%</small></span><button data-replace-contractor="${item.id}">Нанять · выход завтра</button></article>`).join('');
+  $('#teamBook').innerHTML=`<div class="subheading"><span>ВАША КОМАНДА · ОПЫТ ОСТАЁТСЯ</span><strong>${state.team.filter(item=>item.hired).length}</strong></div>${teamRows.join('')}<div class="subheading" style="margin-top:16px"><span>ПОДРЯДЧИКИ · СНЯТИЕ ТОЛЬКО ВЕЧЕРОМ</span><strong>${hired.length}</strong></div>${contractorRows||'<p class="empty-team">На объекте остался только оптимизм.</p>'}${replacements?`<div class="subheading" style="margin-top:16px"><span>ДОНАБОР ЛЮБОГО ПРОФИЛЯ · 1 ДЕНЬ</span><strong>${state.contractors.length} В ПУЛЕ</strong></div><div class="contractor-market-grid">${replacements}</div>`:''}`;
 }
 
 function renderFinanceBook() {
   const finance=state.finance??{ledger:[],received:0,spent:0};
-  $('#financeKpis').innerHTML=`<div><small>НА СЧЁТЕ</small><strong>${money(state.budget)}</strong></div><div><small>ПОЛУЧЕНО</small><strong>${money(finance.received??0)}</strong></div><div><small>ПОТРАЧЕНО</small><strong>${money(finance.spent??0)}</strong></div>`;
+  const organization=ensureOrganization(state);const month=Math.floor((organization.calendarDay??0)/30)+1;
+  const nextLoan=[...(organization.loans??[])].sort((a,b)=>(a.nextDueMonth??0)-(b.nextDueMonth??0))[0];
+  const retention=Math.max(0,(finance.contractValue??0)-(finance.received??0));const docsDone=state.tasks.find(task=>task.id==='executive-docs')?.status==='done';
+  $('#financeKpis').innerHTML=`<div><small>СЧЁТ ОБЪЕКТА</small><strong>${money(state.budget)}</strong></div><div><small>КАССА ОРГАНИЗАЦИИ</small><strong>${money(organization.cash)}</strong></div><div><small>ДОЛГ БАНКУ</small><strong>${money(organization.debt)}</strong></div><div><small>УДЕРЖАНО ДО СДАЧИ ИД</small><strong>${money(retention)} · ${docsDone?'ИД ГОТОВА':'БЛОК'}</strong></div><div><small>СЛЕДУЮЩИЙ ПЛАТЁЖ</small><strong>${nextLoan?money(Math.min(nextLoan.remaining,nextLoan.monthlyPayment+(nextLoan.arrears??0))):'—'}</strong></div><div><small>КАЛЕНДАРЬ / ПРОСРОЧКА</small><strong>М${month} · ${money(organization.arrears??0)}</strong></div>`;
+  const loanRows=(organization.loans??[]).map(loan=>`<article><span><strong>${loan.label}</strong><small>${Math.round(loan.rate*100)}% · ещё ${money(loan.remaining)}</small></span><b>${money(loan.monthlyPayment)}/мес</b></article>`).join('');
+  const creditDisabled=organization.debt>=2320;
+  $('#financeLoans').innerHTML=`<header><span><strong>БАНКОВСКАЯ ЛИНИЯ</strong><small>Деньги идут на счёт объекта. Платёж каждые 30 игровых дней списывается из кассы организации.</small></span><b>МЕСЯЦ ${month}</b></header><div class="finance-loan-actions"><button type="button" data-loan="300" data-loan-recipient="project" ${creditDisabled?'disabled':''}>Взять 300К на объект · 12 мес</button><button type="button" data-loan="800" data-loan-recipient="project" ${creditDisabled?'disabled':''}>Взять 800К на объект · 18 мес</button></div>${loanRows||'<p>Банк пока считает вас человеком, способным читать договор.</p>'}`;
   $('#cashLedger').innerHTML=(finance.ledger??[]).map(row=>`<article class="cash-row ${row.type}"><span>Д${Math.floor((row.hour??0)/24)+1} · ${row.category}</span><div>${row.text}<small>${row.type==='income'?'Деньги существуют до следующей поставки.':'Оплачено, поэтому теперь можно спорить о качестве.'}</small></div><b>${row.type==='income'?'+':'−'}${money(row.amount)}</b></article>`).join('')||'<p>Бухгалтерия ещё не нашла этот проект.</p>';
 }
 
@@ -473,6 +549,7 @@ function renderDocsBook() {
 }
 
 function taskProblem(task) {
+  if(task.status==='awaiting')return 'Физически готово, но этапных денег ещё нет — предъявите заказчику';
   if(task.reworkOf)return 'Переделка из-за неверной последовательности работ';
   if(task.status==='blocked')return `Не хватает ${Math.max(0,task.cost-state.budget)} тыс. ₽ на запуск`;
   const activeQuestion=(state.activeSituations??[]).find(item=>item.crewId===task.crewId);
@@ -491,6 +568,7 @@ function taskProblem(task) {
 
 function taskStatus(task) {
   if(task.status==='done')return ['ГОТОВО','done'];
+  if(task.status==='awaiting')return ['ПРЕДЪЯВИТЬ','acceptance'];
   if(task.status==='active')return ['ИДЁТ','active'];
   if(task.status==='blocked')return ['ПРОБЛЕМА','problem'];
   if(task.status==='locked')return ['ОЖИДАЕТ','waiting'];
@@ -509,6 +587,7 @@ function renderTasks() {
         <span class="task-title-row"><strong>${task.title}</strong><b class="task-state ${statusClass}">${statusLabel}</b></span>
         <span class="task-progress-row"><i><em style="width:${percent}%"></em></i><b>${percent}%</b><small>${SKILL_LABELS[task.skill]} · ${task.duration} ч</small></span>
         ${issue?`<span class="task-problem">! ${issue}</span>`:''}
+        ${task.status==='awaiting'?`<button class="acceptance-button" data-submit-task="${task.id}">Предъявить работу · попытка ${(task.acceptanceAttempts??0)+1}</button>`:''}
       </span>
       <button class="priority-button" data-priority="${task.id}" title="Изменить приоритет" aria-label="Приоритет ${task.priority}">
         <span>P${task.priority}</span><span class="priority-bars">${[1,2,3].map((i) => `<i class="${i > task.priority ? 'off' : ''}"></i>`).join('')}</span>
@@ -520,7 +599,7 @@ function renderTasks() {
 function renderContractors() {
   refs.contractorList.innerHTML = state.contractors.map((contractor) => `<article class="contractor-card">
     <span class="contractor-avatar" style="--crew-color:${contractor.color}">${contractor.initials}</span>
-    <span class="contractor-copy"><strong>${contractor.company}</strong><small>${contractor.name} · ${contractor.quirk}</small><span class="contractor-meta"><b>★ ${contractor.rating}</b><b>↗ ${Math.round((contractor.speed - 1) * 100)}% темп</b></span></span>
+    <span class="contractor-copy"><strong>${contractor.company} · ур. ${contractor.level??1}</strong><small>${contractor.classLabel} · ${contractor.name} · ${contractor.quirk}</small><span class="contractor-meta"><b>★ ${contractor.rating}</b><b>↗ ${Math.round(contractor.speed * 100)}% темп</b><b>◆ ${Math.round(contractor.quality*100)}% качество</b></span></span>
     <button class="hire-button" data-hire="${contractor.id}" ${contractor.hired||state.started ? 'disabled' : ''}>${contractor.hired ? 'НАНЯТЫ' : state.started?'КАРТА':`${contractor.price}К`}</button>
   </article>`).join('');
 }
@@ -530,7 +609,8 @@ function renderCrews() {
     const task = state.tasks.find((item) => item.id === crew.taskId);
     return `<article class="crew-card"><span class="crew-avatar" style="--crew-color:${crew.color}">${crew.initials}</span><span><strong>${crew.name}</strong><small>${task ? task.short : crew.role}</small></span><span class="crew-state ${task ? '' : 'idle'}">${task ? 'РАБОТАЕТ' : 'ЖДЁТ'}</span></article>`;
   }).join('');
-  refs.crewCount.textContent = `${state.crews.length} ${state.crews.length === 1 ? 'человек' : 'бригад'}`;
+  const present=state.crews.filter(crew=>(crew.unavailableUntil??0)<=state.elapsed).length;
+  refs.crewCount.textContent = `${present} на объекте →`;
 }
 
 function renderSelection() {
@@ -545,11 +625,11 @@ function renderSelection() {
     const action=data.isSmoker?'Обсуждает проблему, не двигаясь к ней':task?.title??roleActions[data.role]??'Ожидает доступную работу';
     refs.selection.hidden=false;
     refs.selection.style.setProperty('--task-color',data.role==='client'?'#d6a579':data.role==='architect'?'#d87561':'#ddff55');
-    refs.selection.innerHTML=`<div class="selection-top"><div><span class="eyebrow">ПЕРСОНАЖ</span><h3>${data.displayName}</h3></div><strong>${data.role==='police'?'★':'●'}</strong></div>
+    refs.selection.innerHTML=`<div class="selection-top"><div><span class="eyebrow">${data.role==='player'?'ВЫ НА ОБЪЕКТЕ':'ПЕРСОНАЖ'}</span><h3>${data.displayName}</h3></div><button class="selection-close" data-close-selection type="button" aria-label="Закрыть">×</button></div>
       <p><b>${data.job}${data.company?` · ${data.company}`:''}</b></p>
       <p><span class="person-label">НАСТРОЕНИЕ</span>${mood}</p>
       <p><span class="person-label">ДУМАЕТ</span>${thought}</p>
-      <p><span class="person-label">ДЕЛАЕТ</span>${action}</p>`;
+      <p><span class="person-label">ДЕЛАЕТ</span>${action}</p>${data.role==='player'?`<p><span class="person-label">ЭФФЕКТ</span>В выбранной зоне темп работ +18%</p>`:''}`;
     return;
   }
   const task = state.tasks.find((item) => item.id === state.selectedTaskId);
@@ -560,9 +640,9 @@ function renderSelection() {
   const crew = state.crews.find((item) => item.id === task.crewId);
   refs.selection.hidden = false;
   refs.selection.style.setProperty('--task-color', task.color);
-  refs.selection.innerHTML = `<div class="selection-top"><div><span class="eyebrow">${SKILL_LABELS[task.skill].toUpperCase()}</span><h3>${task.title}</h3></div><strong>${Math.round(task.progress * 100)}%</strong></div>
+  refs.selection.innerHTML = `<div class="selection-top"><div><span class="eyebrow">${SKILL_LABELS[task.skill].toUpperCase()}</span><h3>${task.title}</h3></div><button class="selection-close" data-close-selection type="button" aria-label="Закрыть">×</button></div>
     <p>${crew ? `${crew.name} уже на месте. Осталось примерно ${Math.max(1, Math.ceil(task.duration * (1 - task.progress) / crew.speed))} ч.` : task.status === 'locked' ? 'Сначала завершите зависимые работы. Бетон не читает диаграмму Ганта, но всё равно требует последовательности.' : task.status === 'done' ? 'Работа закрыта. Фото приложены, замечания предусмотрительно не найдены.' : 'Свободная подходящая бригада возьмёт эту работу автоматически.'}</p>
-    <div class="selection-progress"><i style="width:${Math.round(task.progress * 100)}%"></i></div>`;
+    <div class="selection-progress"><i style="width:${Math.round(task.progress * 100)}%"></i></div><button class="player-zone-button" data-player-zone="${task.id}" type="button">${state.playerZoneTaskId===task.id?'ВЫ УЖЕ ЗДЕСЬ · ТЕМП +18%':'ПРИЙТИ В ЭТУ ЗОНУ'}</button>`;
 }
 
 function renderHud() {
@@ -592,11 +672,23 @@ function renderHud() {
   $('#pauseButton').innerHTML = state.paused
     ? '<svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>'
     : '<svg viewBox="0 0 24 24"><path d="M7 5v14M17 5v14"/></svg>';
-  const sitePause=$('#sitePauseButton');
-  sitePause?.classList.toggle('is-paused',state.paused);
-  if(sitePause)sitePause.innerHTML=state.paused?'▶ <span>ПРОДОЛЖИТЬ</span>':'Ⅱ <span>ПАУЗА</span>';
   document.querySelectorAll('[data-speed]').forEach((button) => button.classList.toggle('active', Number(button.dataset.speed) === state.speed));
   renderAmbientBeat();
+  renderSituationInbox();
+}
+
+function renderSituationInbox(){
+  if(!refs.situationInbox)return;
+  const active=[...(state.activeSituations??[])].sort((a,b)=>a.expiresAt-b.expiresAt);
+  const signature=active.map(item=>`${item.uid}:${item.delegated?1:0}:${Math.ceil(Math.max(0,item.expiresAt-state.elapsed)*6)}`).join('|');
+  if(signature===renderedSituationSignature)return;renderedSituationSignature=signature;
+  refs.situationCount.textContent=String(active.length);
+  refs.situationInboxEmpty.hidden=active.length>0;
+  refs.situationInbox.innerHTML=active.map(item=>{
+    const template=situationById.get(item.templateId);const crew=state.crews.find(candidate=>candidate.id===item.crewId);
+    const left=Math.max(0,item.expiresAt-state.elapsed);const resolver=state.team?.find(member=>member.id===template?.resolver&&member.hired);
+    return `<button class="situation-inbox-item${item.delegated?' delegated':''}" data-open-situation="${item.uid}" type="button"><span class="situation-pulse">${item.delegated?'✓':'!'}</span><span><strong>${escapeHtml(template?.title??'Вопрос с площадки')}</strong><small>${escapeHtml(crew?.name??'Прораб')} · ${item.delegated?`${escapeHtml(resolver?.name??'Профильный специалист')} уже разбирается`:'ждут вашего решения'}</small></span><time>${formatRemaining(left)}</time></button>`;
+  }).join('');
 }
 
 let renderedAmbientBeatId=null;
@@ -693,6 +785,7 @@ const office = new THREE.Group();
 scene.add(office);
 const markerMeshes = new Map();
 const crewMeshes = new Map();
+function clearCrewMeshes(){for(const mesh of crewMeshes.values())office.remove(mesh);crewMeshes.clear();selectedPerson=null;}
 const sceneProps = {};
 sceneProps.workLight=new THREE.PointLight('#ffd07a',0,4.8);
 sceneProps.workLight.castShadow=false;
@@ -723,6 +816,31 @@ function box(name, size, pos, material, parent = office, cast = true) {
   parent.add(mesh);
   return mesh;
 }
+
+// The organization headquarters is the main menu itself: a small, persistent
+// Three.js diorama that changes with the notoriously unreliable HQ upgrades.
+const hqScene=new THREE.Scene();hqScene.background=new THREE.Color('#16211b');
+const hqCamera=new THREE.OrthographicCamera(-4.8,4.8,3.7,-3.7,.1,40);hqCamera.position.set(7.2,7.4,7.2);hqCamera.lookAt(0,.45,0);
+const hqRenderer=new THREE.WebGLRenderer({canvas:refs.hqCanvas,antialias:true,alpha:false,powerPreference:'low-power'});hqRenderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));hqRenderer.outputColorSpace=THREE.SRGBColorSpace;hqRenderer.toneMapping=THREE.ACESFilmicToneMapping;hqRenderer.toneMappingExposure=1.08;hqRenderer.shadowMap.enabled=true;hqRenderer.shadowMap.type=THREE.PCFShadowMap;
+hqScene.add(new THREE.HemisphereLight('#e6ffe5','#273029',2.25));const hqSun=new THREE.DirectionalLight('#fff0c8',3.1);hqSun.position.set(4.5,8,5.5);hqSun.castShadow=true;hqSun.shadow.mapSize.set(768,768);hqSun.shadow.camera.left=-6;hqSun.shadow.camera.right=6;hqSun.shadow.camera.top=6;hqSun.shadow.camera.bottom=-6;hqScene.add(hqSun);
+const hqRoot=new THREE.Group();hqScene.add(hqRoot);let hqPreviewKey='';let hqPreviewPeople=[];let hqPreviewScreens=[];
+
+function hqMat(color,roughness=.72,metalness=.04){return new THREE.MeshStandardMaterial({color,roughness,metalness});}
+function hqBox(name,size,pos,material,parent=hqRoot,cast=true){const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.name=name;mesh.position.set(...pos);mesh.castShadow=cast;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
+function hqDesk(x,z,rotation=0){const group=new THREE.Group();group.position.set(x,0,z);group.rotation.y=rotation;hqRoot.add(group);hqBox('hq-desk-top',[1.35,.1,.66],[0,.69,0],hqMat('#98704e'),group);hqBox('hq-desk-leg',[.08,.65,.5],[-.5,.34,0],hqMat('#303b36',.42,.28),group);hqBox('hq-desk-leg',[.08,.65,.5],[.5,.34,0],hqMat('#303b36',.42,.28),group);const screen=hqBox('hq-screen',[.48,.34,.04],[0,.97,.06],new THREE.MeshStandardMaterial({color:'#182b26',emissive:'#6ed6b1',emissiveIntensity:.25,roughness:.28}),group);hqPreviewScreens.push(screen);return group;}
+function hqPerson(x,z,color,index){const avatar=state.playerAvatar??{};const isPlayer=index===0;color=isPlayer?(avatar.color??color):color;const group=new THREE.Group();group.position.set(x,.02,z);const leftLeg=new THREE.Mesh(new THREE.CapsuleGeometry(.065,.3,4,8),hqMat('#303a36'));leftLeg.position.set(-.09,.27,0);group.add(leftLeg);const rightLeg=leftLeg.clone();rightLeg.position.x=.09;group.add(rightLeg);const torso=new THREE.Mesh(new THREE.CapsuleGeometry(.17,.25,5,10),hqMat(color,.58));torso.position.y=.72;group.add(torso);const leftArm=new THREE.Mesh(new THREE.CapsuleGeometry(.045,.28,4,8),hqMat(isPlayer&&avatar.outfit==='suit'?color:'#d7a37c'));leftArm.position.set(-.22,.68,0);leftArm.rotation.z=-.12;group.add(leftArm);const rightArm=leftArm.clone();rightArm.position.x=.22;rightArm.rotation.z=.12;group.add(rightArm);const head=new THREE.Mesh(new THREE.SphereGeometry(.14,14,10),hqMat('#d7a37c'));head.position.y=1.08;group.add(head);const hair=new THREE.Mesh(new THREE.SphereGeometry(.145,12,7,0,Math.PI*2,0,Math.PI/2),hqMat(index%2?'#3c302b':'#6a5548'));hair.position.y=1.145;group.add(hair);let playerAura=null;if(isPlayer){const helmet=new THREE.Mesh(avatar.helmet==='cap'?new THREE.CylinderGeometry(.1,.16,.08,16):new THREE.SphereGeometry(.16,14,7,0,Math.PI*2,0,Math.PI/2),hqMat(avatar.helmet==='visor'?'#202a2b':'#f0f2e9',.35,.1));helmet.position.y=1.19;group.add(helmet);playerAura=new THREE.Mesh(new THREE.RingGeometry(.33,.43,28),new THREE.MeshBasicMaterial({color:'#ddff55',transparent:true,opacity:.9,side:THREE.DoubleSide}));playerAura.rotation.x=-Math.PI/2;playerAura.position.y=.015;group.add(playerAura);}group.scale.setScalar(isPlayer?.9:.8);group.userData={baseX:x,baseZ:z,leftLeg,rightLeg,leftArm,rightArm,index,playerAura};hqRoot.add(group);hqPreviewPeople.push(group);return group;}
+function hqPlant(x,z){const group=new THREE.Group();group.position.set(x,0,z);hqRoot.add(group);const pot=new THREE.Mesh(new THREE.CylinderGeometry(.2,.16,.34,12),hqMat('#c87552'));pot.position.y=.17;group.add(pot);for(let i=0;i<6;i++){const leaf=new THREE.Mesh(new THREE.SphereGeometry(.17,8,6),hqMat(i%2?'#69a977':'#82bd82'));leaf.scale.set(.5,1.55,.4);leaf.rotation.z=(i-2.5)*.3;leaf.position.set(Math.sin(i)*.12,.58+(i%2)*.1,Math.cos(i)*.12);group.add(leaf);}}
+function rebuildHqPreview(){const hq=state.hq??{level:0,attempts:0};const avatar=state.playerAvatar??{};const key=`${hq.level}:${hq.attempts}:${avatar.color}:${avatar.outfit}:${avatar.helmet}`;if(key===hqPreviewKey)return;hqPreviewKey=key;hqRoot.traverse(node=>{if(node.isMesh){node.geometry?.dispose();if(Array.isArray(node.material))node.material.forEach(item=>item.dispose());else node.material?.dispose();}});hqRoot.clear();hqPreviewPeople=[];hqPreviewScreens=[];const level=hq.level??0;
+  hqBox('hq-slab',[6.4,.22,4.7],[0,-.13,0],hqMat(level>=3?'#c9c3b4':'#8d8b7d'),hqRoot,false);hqBox('hq-back-wall',[6.4,2.1,.12],[0,1.02,-2.3],hqMat(level>=3?'#e5e0d3':'#c8c4b6'));hqBox('hq-left-wall',[.12,2.1,4.7],[-3.15,1.02,0],hqMat(level>=2?'#ded9cc':'#bdbbad'));
+  hqDesk(-.75,.35);hqBox('hq-printer',[.58,.48,.52],[-2.35,.28,-1.35],hqMat('#d9ded9',.35,.16));hqBox('hq-paper',[.34,.03,.42],[-2.35,.55,-1.34],hqMat('#f3f0e7'),hqRoot,false);
+  if(level===0){hqBox('hq-folding-chair',[.48,.08,.46],[-.7,.39,1.12],hqMat('#65716a'));for(let i=0;i<4;i++)hqBox('hq-failure-box',[.55,.35,.48],[1.45+(i%2)*.62,.18,-.9+Math.floor(i/2)*.55],hqMat(i%2?'#b57b45':'#c98c50'));}
+  if(level>=1){hqBox('hq-partition',[.1,1.65,2.0],[1.55,.82,-1.25],hqMat('#d7d2c6'));hqBox('hq-cabinet',[.72,1.35,.5],[2.45,.67,-1.85],hqMat('#65756d'));}
+  if(level>=2){hqPlant(2.45,1.45);hqBox('hq-meeting-table',[1.8,.12,.9],[1.35,.65,.9],hqMat('#9a704d'));for(const x of [.7,1.35,2])hqBox('hq-chair',[.38,.55,.38],[x,.3,1.55],hqMat('#496d61'));}
+  if(level>=3){hqDesk(-2.05,.55,Math.PI);hqDesk(-.65,-1.25,Math.PI);hqBox('hq-sofa',[1.65,.48,.72],[1.65,.34,-1.2],hqMat('#d87561'));hqBox('hq-rug',[2.0,.025,1.35],[1.5,.02,.1],hqMat('#527369'),hqRoot,false);}
+  if(level>=4){const glass=new THREE.MeshPhysicalMaterial({color:'#91cfd0',transparent:true,opacity:.32,roughness:.1,transmission:.2});hqBox('hq-glass',[2.6,1.8,.04],[1.45,.9,-.35],glass);hqBox('hq-sign',[1.35,.45,.06],[-1.65,1.45,-2.21],new THREE.MeshStandardMaterial({color:'#ddff55',emissive:'#8fa82e',emissiveIntensity:.45}));}
+  const colors=['#ddff55','#69bfe8','#a58ae1','#d87561','#69daa9'];for(let i=0;i<Math.min(5,1+level);i++)hqPerson(-1.6+i*.72,1.25-(i%2)*.6,colors[i],i);
+}
+function renderHqPreview(now){if(!refs.menu.classList.contains('visible'))return;rebuildHqPreview();const stage=refs.hqCanvas.parentElement;const width=Math.floor(stage.clientWidth),height=Math.floor(stage.clientHeight);if(!width||!height)return;hqRenderer.setSize(width,height,false);const aspect=width/height;hqCamera.left=-4.2*aspect;hqCamera.right=4.2*aspect;hqCamera.top=4.2;hqCamera.bottom=-4.2;hqCamera.updateProjectionMatrix();const t=now*.001;hqPreviewPeople.forEach((person,index)=>{const u=person.userData;const phase=t*(.55+index*.08)+index*1.7;person.position.x=u.baseX+Math.sin(phase)*(.18+index*.035);person.position.z=u.baseZ+Math.cos(phase*.82)*.16;person.rotation.y=Math.atan2(Math.cos(phase),-Math.sin(phase*.82));const swing=Math.sin(t*7.2+index)*.38;u.leftLeg.rotation.x=swing;u.rightLeg.rotation.x=-swing;u.leftArm.rotation.x=-swing*.7;u.rightArm.rotation.x=swing*.7;if(u.playerAura){const pulse=1+Math.sin(t*3.2)*.08;u.playerAura.scale.setScalar(pulse);}});hqPreviewScreens.forEach((screen,index)=>{screen.material.emissiveIntensity=.28+Math.abs(Math.sin(t*1.8+index))*.55;});hqRenderer.render(hqScene,hqCamera);}
 
 function makeDesk(x, z, rotation = 0) {
   const group = new THREE.Group();
@@ -1045,13 +1163,13 @@ function makeCapsule(radius, length, color, roughness=.72) {
   return mesh;
 }
 
-function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0, profile } = {}) {
+function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0, profile, avatar } = {}) {
   const person=new THREE.Group();
   profile ??= createPersonProfile(role, state.visualSeed ?? 1, variant);
   skin=profile.skin??skin;
-  const isWorker=['worker','foreman','moving','paint','electric','furniture','cleaning','delivery'].includes(role);
+  const isPlayer=role==='player';const isWorker=['worker','foreman','moving','paint','electric','furniture','cleaning','delivery'].includes(role)||(isPlayer&&avatar?.outfit!=='suit');
   const isForeman=role==='foreman';
-  const isSuit=['client','boss','inspector'].includes(role);
+  const isSuit=['client','boss','inspector'].includes(role)||(isPlayer&&avatar?.outfit==='suit');
   const trouserColor=isSuit?'#1e2b33':role==='architect'?'#27302e':role==='police'?'#172c48':role==='medic'?'#d8e4df':'#343e39';
 
   const leftLeg=makeCapsule(.06,.29,trouserColor); leftLeg.position.set(-.095,.25,0); person.add(leftLeg);
@@ -1059,7 +1177,7 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
   const leftShoe=box('shoe',[.13,.07,.22],[-.095,.055,.045],mat('#151a18',.55),person); leftShoe.rotation.y=.04;
   const rightShoe=box('shoe',[.13,.07,.22],[.095,.055,.045],mat('#151a18',.55),person); rightShoe.rotation.y=-.04;
 
-  const torsoColor=role==='client'?'#31495a':role==='boss'?'#3c3545':role==='inspector'?'#48565b':role==='architect'?'#79525d':role==='police'?'#1f4168':role==='medic'?'#e8efeb':color;
+  const torsoColor=isPlayer?(avatar?.color??color):role==='client'?'#31495a':role==='boss'?'#3c3545':role==='inspector'?'#48565b':role==='architect'?'#79525d':role==='police'?'#1f4168':role==='medic'?'#e8efeb':color;
   const torso=makeCapsule(.155,.23,torsoColor,.62); torso.scale.set(1,.98,.72); torso.position.y=.68; person.add(torso);
   const leftArm=makeCapsule(.047,.27,role==='client'?torsoColor:skin); leftArm.position.set(-.215,.66,0); leftArm.rotation.z=-.15; person.add(leftArm);
   const rightArm=makeCapsule(.047,.27,role==='client'?torsoColor:skin); rightArm.position.set(.215,.66,0); rightArm.rotation.z=.15; person.add(rightArm);
@@ -1072,9 +1190,11 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
 
   if(isWorker) {
     // Yellow hard hats for crews, white for the foreman.
-    const helmetColor=isForeman?'#f0f2e9':'#f2c84e';
-    const dome=new THREE.Mesh(new THREE.SphereGeometry(.158,16,8,0,Math.PI*2,0,Math.PI/2),mat(helmetColor,.38,.08)); dome.position.y=1.16; dome.castShadow=true; person.add(dome);
+    const helmetColor=isPlayer?(avatar?.helmet==='visor'?'#202a2b':'#f0f2e9'):isForeman?'#f0f2e9':'#f2c84e';
+    const domeGeometry=isPlayer&&avatar?.helmet==='cap'?new THREE.CylinderGeometry(.105,.165,.075,16):new THREE.SphereGeometry(.158,16,8,0,Math.PI*2,0,Math.PI/2);
+    const dome=new THREE.Mesh(domeGeometry,mat(helmetColor,.38,.08)); dome.position.y=isPlayer&&avatar?.helmet==='cap'?1.18:1.16; dome.castShadow=true; person.add(dome);
     const brim=new THREE.Mesh(new THREE.CylinderGeometry(.19,.19,.035,18),mat(helmetColor,.38,.08)); brim.position.set(0,1.155,.025); brim.castShadow=true; person.add(brim);
+    if(isPlayer&&avatar?.helmet==='visor')box('player-visor',[.25,.16,.025],[0,1.1,.16],new THREE.MeshPhysicalMaterial({color:'#8bcad0',transparent:true,opacity:.42,roughness:.08}),person);
     const vest=box('safety-vest',[.29,.24,.17],[0,.7,.075],mat(isForeman?'#d9f45b':color,.7),person);
     box('vest-stripe',[.3,.026,.178],[0,.68,.079],mat('#eef3dc',.45,.05),person);
     if(role==='electric') box('tool-bag',[.16,.18,.12],[.23,.44,-.03],mat('#284a5e'),person);
@@ -1098,6 +1218,11 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
       const rightMuff=leftMuff.clone();rightMuff.position.x=.16;person.add(rightMuff);
     }
     if(profile.accessory===3) box('tool-pouch',[.15,.17,.09],[-.2,.42,-.02],mat('#634934'),person);
+  }
+
+  if(isPlayer&&avatar?.outfit==='suit'){
+    box('player-shirt',[.12,.23,.175],[0,.75,.085],mat('#eef1ec'),person);box('player-tie',[.035,.2,.02],[0,.72,.18],mat('#d87561'),person);
+    const headwear=avatar.helmet==='cap'?new THREE.CylinderGeometry(.11,.17,.08,16):new THREE.SphereGeometry(.16,16,8,0,Math.PI*2,0,Math.PI/2);const helmet=new THREE.Mesh(headwear,mat(avatar.helmet==='visor'?'#202a2b':'#f0f2e9',.35,.1));helmet.position.y=1.19;person.add(helmet);
   }
 
   if(role==='architect') {
@@ -1146,24 +1271,33 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
   const bubbleText=bubbleFor(role,profile.bubbleVariant+variant);
   const bubble=makeBubbleSprite(bubbleText);person.add(bubble);
   const alertBubble=makeBubbleSprite('!');alertBubble.scale.set(.48,.48,1);alertBubble.position.set(.22,1.58,0);person.add(alertBubble);
+  const selectionRing=new THREE.Mesh(new THREE.RingGeometry(.3,.38,24),new THREE.MeshBasicMaterial({color:isPlayer?'#ddff55':'#ffffff',transparent:true,opacity:.9,side:THREE.DoubleSide,depthWrite:false}));selectionRing.rotation.x=-Math.PI/2;selectionRing.position.y=.015;selectionRing.visible=false;person.add(selectionRing);
+  let playerAura=null;let playerBadge=null;let playerMarker=null;
+  if(isPlayer){
+    playerAura=new THREE.Mesh(new THREE.RingGeometry(.55,.7,32),new THREE.MeshBasicMaterial({color:'#ddff55',transparent:true,opacity:.88,side:THREE.DoubleSide,depthWrite:false}));playerAura.rotation.x=-Math.PI/2;playerAura.position.y=.012;person.add(playerAura);
+    const innerAura=new THREE.Mesh(new THREE.RingGeometry(.25,.28,24),new THREE.MeshBasicMaterial({color:avatar?.color??'#ddff55',transparent:true,opacity:.8,side:THREE.DoubleSide,depthWrite:false}));innerAura.rotation.x=-Math.PI/2;innerAura.position.y=.014;playerAura.add(innerAura);
+    playerBadge=makeBubbleSprite('ВЫ');playerBadge.scale.set(1.38,.68,1);playerBadge.position.set(0,1.9,0);person.add(playerBadge);
+    playerMarker=new THREE.Mesh(new THREE.OctahedronGeometry(.22,0),new THREE.MeshStandardMaterial({color:'#ddff55',emissive:'#9cbc1f',emissiveIntensity:1.8,roughness:.2}));playerMarker.scale.y=1.55;playerMarker.position.set(0,2.34,0);person.add(playerMarker);
+    box('player-tablet',[.24,.32,.028],[-.28,.62,.13],mat('#263b40',.28,.2),person);
+  }
 
   const names=PERSON_NAMES[role]??PERSON_NAMES.worker;
   const displayName=role==='client'&&state.selectedOrder?.clientPerson?state.selectedOrder.clientPerson:(['police','inspector','boss','medic'].includes(role)?names[variant%names.length]:profile.name);
-  const personScale=.74;
+  const personScale=isPlayer?.98:.74;
   person.scale.set(profile.body*personScale,profile.height*personScale,profile.body*personScale);
-  person.userData={isPerson:true,role,displayName,job:PERSON_JOBS[role]??PERSON_JOBS.worker,leftLeg,rightLeg,leftArm,rightArm,variant,bubble,alertBubble,profile};
+  person.userData={isPerson:true,role,displayName:isPlayer?(sessionUser??'Вы'):displayName,job:isPlayer?'Технический заказчик · ваш аватар':PERSON_JOBS[role]??PERSON_JOBS.worker,leftLeg,rightLeg,leftArm,rightArm,variant,bubble,alertBubble,selectionRing,playerAura,playerBadge,playerMarker,profile};
   return person;
 }
 
 function makeCrewMesh(crew) {
   const group = new THREE.Group();
-  const role=crew.id==='foreman'?'foreman':crew.skill==='design'?'architect':crew.skill==='documentation'?'foreman':crew.supportRole==='procurement'?'client':crew.supportRole?'foreman':crew.skill;
+  const role=crew.id==='foreman'?'player':crew.skill==='design'?'architect':crew.skill==='documentation'?'foreman':crew.supportRole==='procurement'?'client':crew.supportRole?'foreman':crew.skill;
   const areaWorkers=Math.min(3,Math.floor((state.selectedOrder?.area??280)/700));
   const count=crew.id==='foreman'||crew.id.startsWith('team-')?1:2+areaWorkers+((state.visualSeed??1)+crew.id.length)%2;
   const people=[];
   for(let i=0;i<count;i++) {
     const profile=createPersonProfile(role,(state.visualSeed??1)+crew.id.length*41,i);
-    const person=makePerson({role,color:crew.color,variant:i,profile});
+    const person=makePerson({role,color:crew.color,variant:i,profile,avatar:crew.id==='foreman'?state.playerAvatar:null});
     person.userData.crewId=crew.id;person.userData.company=crew.name;
     if(crew.id.startsWith('team-'))person.userData.job=crew.role;
     person.position.set((i-.5*(count-1))*.38,0,i*.18);person.userData.baseLocal=person.position.clone();person.rotation.y=i?.28:-.16; group.add(person); people.push(person);
@@ -1418,7 +1552,7 @@ function animateScene(now) {
       }
     }
     const hasQuestion=(state.activeSituations??[]).some(item=>item.crewId===crew.id);
-    mesh.userData.people.forEach((person,index)=>{person.userData.alertBubble.visible=hasQuestion&&index===0;if(hasQuestion)person.userData.bubble.visible=false;});
+    mesh.userData.people.forEach((person,index)=>{person.userData.alertBubble.visible=hasQuestion&&index===0;if(hasQuestion)person.userData.bubble.visible=false;person.userData.selectionRing.visible=person===selectedPerson;});
   }
 
   const activeTask=state.tasks.find(task=>task.status==='active'&&['move','electric','prep','paint','desks','clean'].includes(task.id));
@@ -1493,6 +1627,7 @@ function animateScene(now) {
     puff.position.y=.9+cycle*1.15;puff.position.x=6.15+(index%3)*.48+Math.sin(t+index)*.08;
     puff.material.opacity=(1-cycle)*.24;
   }
+  office.traverse(node=>{if(node.userData?.isPerson&&node.userData.selectionRing){node.userData.selectionRing.visible=node===selectedPerson;if(node.userData.playerAura){const pulse=1+Math.sin(t*3.6)*.09;node.userData.playerAura.scale.setScalar(pulse);node.userData.playerAura.rotation.z=t*.4;}if(node.userData.playerBadge)node.userData.playerBadge.material.opacity=.9+Math.sin(t*2.4)*.08;if(node.userData.playerMarker){node.userData.playerMarker.position.y=2.34+Math.sin(t*3.4)*.09;node.userData.playerMarker.rotation.y=t*1.7;}}});
 }
 
 function resizeRenderer() {
@@ -1533,11 +1668,18 @@ function openEvent(eventId) {
   refs.event.classList.add('visible');
 }
 
-function deltaText(deltas){return [['budget','тыс. ₽'],['time','ч'],['quality','качество'],['trust','доверие']].filter(([key])=>deltas[key]).map(([key,label])=>`${deltas[key]>0?'+':''}${deltas[key]} ${label}`).join(' · ')||'без прямых затрат';}
+function deltaText(deltas){return [['budget','тыс. ₽'],['deadline','ч к сроку'],['time','ч'],['quality','качество'],['trust','доверие']].filter(([key])=>deltas[key]).map(([key,label])=>`${deltas[key]>0?'+':''}${deltas[key]} ${label}`).join(' · ')||'без прямых затрат';}
 function showSituation(active){
   const template=situationById.get(active.templateId);if(!template)return;
-  openSituationId=active.uid;state.paused=true;$('#situationTitle').textContent=template.title;$('#situationText').textContent=template.text;
+  if(!openSituationId)situationWasPaused=state.paused;openSituationId=active.uid;state.paused=true;$('#situationTitle').textContent=template.title;$('#situationText').textContent=template.text;
   $('#situationOptions').innerHTML=template.choices.map(choice=>`<button class="event-option" data-situation-choice="${choice.id}"><strong>${choice.title}</strong><span>${deltaText(choice.deltas)}</span><small>${choice===template.choices[0]?'Разобраться сейчас и оставить след в документах.':'Быстрое решение, которое удобно исполнителю.'}</small></button>`).join('');refs.situation.classList.add('visible');
+}
+
+function focusSituation(active){
+  const crew=state.crews.find(item=>item.id===active.crewId);const mesh=crewMeshes.get(active.crewId);
+  if(mesh){cameraFocus.set(mesh.position.x-1.6,0,mesh.position.z);cameraZoom=Math.max(cameraZoom,1.24);updateCamera();selectedPerson=mesh.userData.people?.[0]??null;}
+  else if(crew){cameraFocus.set(siteX(crew.x)-1.6,0,siteZ(crew.y));cameraZoom=Math.max(cameraZoom,1.18);updateCamera();}
+  showSituation(active);
 }
 
 function showResult() {
@@ -1547,7 +1689,7 @@ function showResult() {
   $('#resultSeal').textContent=result.grade;
   $('#resultTitle').textContent=result.grade==='D'?'Офис открыт. Технически.':'Офис принят';
   $('#resultText').textContent=onTime?'В понедельник сотрудники нашли столы, розетки и даже стены одного цвета. Для fit-out это почти чудо.':`Открылись с опозданием на ${Math.ceil(result.late)} ч. Заказчик называет это «поэтапным вводом», и мы не спорим.`;
-  $('#resultStats').innerHTML=`<div><small>ПРИБЫЛЬ / УБЫТОК</small><strong>${settlement.profit>=0?'+':''}${money(settlement.profit)}</strong></div><div><small>КАЧЕСТВО</small><strong>${Math.round(state.quality)}</strong></div><div><small>ДОВЕРИЕ</small><strong>${Math.round(state.trust)}%</strong></div><div><small>ПОГАШЕНО ДОЛГА</small><strong>${money(settlement.debtPayment??0)}</strong></div>
+  $('#resultStats').innerHTML=`<div><small>ПРИБЫЛЬ / УБЫТОК</small><strong>${settlement.profit>=0?'+':''}${money(settlement.profit)}</strong></div><div><small>ОПЫТ ОРГАНИЗАЦИИ</small><strong>+${settlement.gainedXp??0} XP · ур. ${settlement.playerLevel??ensureOrganization(state).playerLevel}</strong></div><div><small>КАЧЕСТВО</small><strong>${Math.round(state.quality)}</strong></div><div><small>ДОВЕРИЕ</small><strong>${Math.round(state.trust)}%</strong></div><div><small>ПОГАШЕНО ДОЛГА</small><strong>${money(settlement.debtPayment??0)}</strong></div>
     <div class="hq-card"><small>ВАШ СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ ${state.hq?.level ?? 0}</small><strong>${state.hq?.title ?? 'Стол у принтера'}</strong><small id="hqFailure">${state.hq?.lastFailure ?? 'Клиентам строим лучше, чем себе.'}</small><button class="secondary-button" id="upgradeHq">Вложить прибыль в штаб (сомнительно)</button></div>`;
   refs.result.classList.add('visible'); persistGame();
   $('#upgradeHq').addEventListener('click',()=>{
@@ -1560,16 +1702,34 @@ function showResult() {
 
 document.addEventListener('click',(event)=>{
   ensureAudio();
+  const closeSelection=event.target.closest('[data-close-selection]');
+  if(closeSelection){selectedPerson=null;state.selectedTaskId=null;renderSelection();return;}
+  const avatarControl=event.target.closest('[data-avatar-color],[data-avatar-outfit],[data-avatar-helmet]');
+  if(avatarControl){state.playerAvatar??={color:'#ddff55',outfit:'vest',helmet:'classic'};if(avatarControl.dataset.avatarColor)state.playerAvatar.color=avatarControl.dataset.avatarColor;if(avatarControl.dataset.avatarOutfit)state.playerAvatar.outfit=avatarControl.dataset.avatarOutfit;if(avatarControl.dataset.avatarHelmet)state.playerAvatar.helmet=avatarControl.dataset.avatarHelmet;const playerMesh=crewMeshes.get('foreman');if(playerMesh){office.remove(playerMesh);crewMeshes.delete('foreman');}selectedPerson=null;hqPreviewKey='';renderMainMenu();syncSceneFromState();persistGame();showToast('Аватар обновлён. Каска по-прежнему не заменяет решение.','done');return;}
+  const playerZone=event.target.closest('[data-player-zone]');
+  if(playerZone){const task=state.tasks.find(item=>item.id===playerZone.dataset.playerZone);const player=state.crews.find(item=>item.id==='foreman');if(task&&player){state.playerZoneTaskId=task.id;player.x=task.x;player.y=task.y;player.state='supervising';const mesh=crewMeshes.get(player.id);if(mesh){mesh.position.set(siteX(player.x),.03,siteZ(player.y));selectedPerson=mesh.userData.people?.[0]??null;}renderSelection();persistGame();feedback('message');showToast(`Вы перешли в зону «${task.short}». Пока вы рядом, темп +18%.`,'done');}return;}
   const loanButton=event.target.closest('[data-loan]');
-  if(loanButton){const loan=takeOrganizationLoan(state,Number(loanButton.dataset.loan));if(loan.ok){renderMainMenu();persistGame();feedback('cash');showToast(`Кредит получен: ${money(loan.principal)}. Вернуть придётся ${money(loan.repayment)}.`,'risk');}else showToast(loan.reason==='project-active'?'Банк кредитует только между проектами.':'Кредитный комитет уже нервничает. Лимит исчерпан.','risk');}
+  if(loanButton){const loan=takeOrganizationLoan(state,Number(loanButton.dataset.loan),loanButton.dataset.loanRecipient??'auto');if(loan.ok){renderMainMenu();if(refs.market.classList.contains('visible'))renderPreparation();if(refs.finance.classList.contains('visible'))renderFinanceBook();renderHud();persistGame();feedback('cash');showToast(`Кредит ${money(loan.principal)} поступил ${loan.recipient==='project'?'на счёт объекта':'в кассу организации'}. Платёж ${money(loan.monthlyPayment)} каждый месяц.`,'risk');}else showToast('Кредитный комитет уже нервничает. Лимит исчерпан.','risk');}
+  if(event.target.closest('[data-edit-evening-schedule]')){refs.report.classList.remove('visible');eveningEditing=true;openMasterSchedule();}
+  if(event.target.closest('[data-open-evening-team]')){renderTeamBook();refs.team.classList.add('visible');}
+  const scheduleRoute=event.target.closest('[data-schedule-route]');
+  if(scheduleRoute){selectedScheduleRoute=scheduleRoute.dataset.scheduleRoute;renderEveningScheduleDecision();}
   const orderPin=event.target.closest('[data-order-id]');
   if(orderPin){selectedOrderId=orderPin.dataset.orderId;renderOrders();}
   const contractCard=event.target.closest('[data-contract-card]');
   if(contractCard){const card=CONTRACT_CARDS.find(item=>item.id===contractCard.dataset.contractCard);if(applyContractCard(state,card)){renderNegotiation();renderHud();}}
   const teamHire=event.target.closest('[data-team-hire]');
-  if(teamHire){const result=hireTeamMember(state,teamHire.dataset.teamHire);if(result.ok){renderPreparation();renderAll();feedback('cash');showToast(`${result.member.name}: теперь у проекта есть ${result.member.role.toLowerCase()}.`,'done');}else if(result.reason==='budget')showToast('На собственную команду не хватило собственного бюджета.','risk');}
+  if(teamHire){const result=hireTeamMember(state,teamHire.dataset.teamHire);if(result.ok){state.preparationConfirmed=false;renderPreparation();renderAll();feedback('cash');showToast(`${result.member.name}: теперь у проекта есть ${result.member.role.toLowerCase()}.`,'done');}else if(result.reason==='budget')showToast('Не хватило ни аванса, ни денег компании. Бухгалтерия редкий раз единодушна.','risk');}
+  const teamUnhire=event.target.closest('[data-team-unhire]');if(teamUnhire){const result=unhireTeamMember(state,teamUnhire.dataset.teamUnhire);if(result.ok){state.preparationConfirmed=false;renderPreparation();renderAll();showToast(`${result.member.name} отозван(а). Деньги вернулись туда, откуда списались.`);}}
   const mapHire=event.target.closest('[data-map-hire]');
-  if(mapHire){const result=hireContractor(state,mapHire.dataset.mapHire);if(result.ok){renderPreparation();renderAll();feedback('cash');showToast(`${result.contractor.company}: едут на объект. Возможно, даже на этот.`,'done');}else if(result.reason==='budget')showToast('Мобилизация не помещается в бюджет.','risk');}
+  if(mapHire){const result=hireContractor(state,mapHire.dataset.mapHire);if(result.ok){state.preparationConfirmed=false;renderPreparation();renderAll();feedback('cash');showToast(`${result.contractor.company}: едут на объект. Возможно, даже на этот.`,'done');}else if(result.reason==='budget')showToast('Не хватило аванса и кассы компании. Кредитная кнопка подозрительно близко.','risk');}
+  const mapUnhire=event.target.closest('[data-map-unhire]');if(mapUnhire){const result=unhireContractor(state,mapUnhire.dataset.mapUnhire);if(result.ok){state.preparationConfirmed=false;renderPreparation();renderAll();showToast(`${result.contractor.company}: мобилизация отменена, деньги возвращены.`);}}
+  const dismiss=event.target.closest('[data-dismiss-contractor]');
+  if(dismiss){const result=dismissContractor(state,dismiss.dataset.dismissContractor);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(`${result.contractor.company} сняты. Сегодня уже никто новый не выйдет.`,'risk');}else showToast('Менять подрядчика можно на вечернем закрытии дня.','risk');}
+  const replacement=event.target.closest('[data-replace-contractor]');
+  if(replacement){const result=hireContractor(state,replacement.dataset.replaceContractor);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(`${result.contractor.company}: оплачены, выйдут завтра. Профиль уже никто не проверяет.`,'done');}else if(result.reason==='budget')showToast('На донабор не хватает денег объекта.','risk');}
+  const forceAssign=event.target.closest('[data-force-assign]');
+  if(forceAssign){const select=document.querySelector(`[data-assignment-select="${CSS.escape(forceAssign.dataset.forceAssign)}"]`);const result=forceAssignCrew(state,forceAssign.dataset.forceAssign,select?.value);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(result.mismatch?'Нагнали непрофильного специалиста: темп 55%, качество под вопросом.':'Фронт усилен профильной командой.','risk');}else showToast(result.reason==='budget'?'На этот нагон не хватает денег.':'Этот фронт уже занят или человек ещё не вышел.','risk');}
   const dayTask=event.target.closest('[data-day-task]');
   if(dayTask){const task=state.tasks.find(item=>item.id===dayTask.dataset.dayTask);if(task){if(task.enabledToday)cyclePriority(state,task.id);else task.enabledToday=true;renderDayPlan();}}
   const scheduleDay=event.target.closest('[data-schedule-day]');
@@ -1577,15 +1737,31 @@ document.addEventListener('click',(event)=>{
   const scheduleOrder=event.target.closest('[data-schedule-order]');
   if(scheduleOrder){moveMasterScheduleTask(state,scheduleOrder.dataset.scheduleTask,Number(scheduleOrder.dataset.scheduleOrder));renderMasterSchedule();}
   const sendUrgent=event.target.closest('[data-send-urgent]');
-  if(sendUrgent){const task=state.tasks.find(item=>item.id===$('#urgentTaskSelect')?.value);const message=$('#urgentMessageInput')?.value?.trim()||'Сделать срочно.';if(task&&state.budget>=5){state.budget-=5;state.trust=Math.max(0,state.trust-1);task.enabledToday=true;task.priority=3;state.chatMessages??=[];state.chatMessages.push({mine:true,name:sessionUser??'Вы',text:`${message} — ${task.title}`,time:projectTime()});state.chatMessages=state.chatMessages.slice(-14);if(state.tutorial)state.tutorial.chatSent=true;feedback('message');renderAll();renderWhatsapp();persistGame();showToast(`Сообщение отправлено: «${task.short} — срочно».`,'risk');}else showToast('Даже срочность теперь не по бюджету.','risk');}
+  if(sendUrgent){const task=state.tasks.find(item=>item.id===$('#urgentTaskSelect')?.value);const message=$('#urgentMessageInput')?.value?.trim()||'Сделать срочно.';if(task&&state.budget>=5){const outcome=sendPressureInstruction(state,task.id,'chat');state.chatMessages??=[];state.chatMessages.push({mine:true,name:sessionUser??'Вы',text:`${message} — ${task.title}`,time:projectTime()});state.chatMessages=state.chatMessages.slice(-14);if(state.tutorial)state.tutorial.chatSent=true;feedback(outcome.worked?'message':'risk');renderAll();renderWhatsapp();persistGame();showToast(outcome.worked?'Сообщение подействовало: на 2,5 часа темп выше.':'Сообщение прочитали. Потом обсудили тон сообщения.','risk');}else showToast('Даже срочность теперь не по бюджету.','risk');}
   const emailTemplate=event.target.closest('[data-email-template]');
   if(emailTemplate)renderEmailComposer(emailTemplate.dataset.emailTemplate);
   const sendEmail=event.target.closest('[data-send-email]');
-  if(sendEmail){const target=sendEmail.dataset.sendEmail;if(target==='client'){state.trust=Math.min(100,state.trust+2);state.elapsed+=1;}if(target==='boss'){state.budget+=20;state.trust=Math.max(0,state.trust-2);}if(target==='contractors'){state.quality=Math.min(100,state.quality+1);state.budget-=10;}state.emailHistory??=[];state.emailHistory.push({template:target,time:projectTime()});closeCommunication();renderAll();persistGame();showToast('Письмо отправлено. В копии 17 человек, решение теперь хотя бы ищется.');}
+  if(sendEmail){
+    const target=sendEmail.dataset.sendEmail;let outcome=null;
+    if(target==='client'){state.trust=Math.min(100,state.trust+2);state.elapsed+=1;}
+    if(target==='clientMoney')outcome=requestClientFunding(state);
+    if(target==='boss'){state.budget+=20;state.trust=Math.max(0,state.trust-2);}
+    if(target==='contractors')outcome=sendContractorEscalation(state,$('#emailContractorSelect')?.value??'all');
+    state.emailHistory??=[];state.emailHistory.push({template:target,time:projectTime()});closeCommunication();renderAll();persistGame();
+    if(outcome?.reason==='already-requested')showToast('Сегодня заказчик уже читал одну просьбу о деньгах. Вторую он удалил не открывая.','risk');
+    else if(outcome?.reason==='fixed-contract')showToast('На госзаказе цена зафиксирована. Просьба о деньгах теперь называется материалом проверки.','risk');
+    else if(outcome?.reason==='daily-limit')showToast('Вторую жёсткую претензию за день юристы назвали эмоциональной рассылкой.','risk');
+    else if(outcome?.reason==='contractor'||outcome?.reason==='no-front')showToast('Письмо некому исполнять: сначала наймите подрядчика или дайте ему фронт.','risk');
+    else if(target==='contractors'&&outcome)showToast(outcome.worked?'Претензия сработала: пять часов усиленного темпа.':'Даже жёсткое письмо попало в редкие 10% административного вакуума.',outcome.worked?'done':'risk');
+    else if(outcome)showToast(outcome.approved?`Заказчик согласовал ещё ${money(outcome.amount)}. Теперь это тоже надо освоить.`:'Заказчик отказал: «это уже входило в исходный объём».',outcome.approved?'done':'risk');
+    else showToast('Письмо отправлено. В копии 17 человек, решение теперь хотя бы ищется.');
+  }
   const taskCard=event.target.closest('[data-task]');
-  if(taskCard&&!event.target.closest('[data-priority]')){selectedPerson=null;state.selectedTaskId=taskCard.dataset.task;renderTasks();renderSelection();}
+  if(taskCard&&!event.target.closest('[data-priority],[data-submit-task]')){selectedPerson=null;state.selectedTaskId=taskCard.dataset.task;renderTasks();renderSelection();}
   const priority=event.target.closest('[data-priority]');
   if(priority){event.stopPropagation(); if(cyclePriority(state,priority.dataset.priority)){renderTasks();showToast('Приоритет изменён. Прораб многозначительно переставил стикер.');}}
+  const submitTask=event.target.closest('[data-submit-task]');
+  if(submitTask){event.stopPropagation();const result=submitTaskForAcceptance(state,submitTask.dataset.submitTask);if(result.ok){renderAll();persistGame();feedback(result.accepted?'cash':'risk');showToast(result.accepted?`Работа принята${result.payment?` — заказчик закрыл ${money(result.payment)}`:''}.`:`Не приняли. Замечания займут минимум полсмены и ${money(result.remedialCost)}.`,result.accepted?'done':'risk');}}
   const hire=event.target.closest('[data-hire]');
   if(hire){const result=hireContractor(state,hire.dataset.hire); if(result.ok){renderAll();showToast(`${result.contractor.company}: мобилизация подтверждена`,'done');}else if(result.reason==='budget'){showToast('На счёте недостаточно оптимизма и денег.','risk');}}
   const choice=event.target.closest('[data-event-choice]');
@@ -1596,13 +1772,15 @@ document.addEventListener('click',(event)=>{
     refs.event.classList.remove('visible');feedback(catalogEvent?.options?.find(option=>option.id===choice.dataset.eventChoice)?.deltas?.budget<0?'risk':'done');showToast('Решение принято. Последствия уже в пути.');eventShowing=null;renderAll();
   }
   const situationChoice=event.target.closest('[data-situation-choice]');
-  if(situationChoice&&openSituationId){resolveSituation(state,openSituationId,situationChoice.dataset.situationChoice);openSituationId=null;refs.situation.classList.remove('visible');state.paused=false;renderAll();showToast('Ответ отправлен. Подрядчик понял его в пределах своей сметы.');}
-  if(event.target.closest('[data-close-modal]')) refs.brief.classList.remove('visible');
+  if(situationChoice&&openSituationId){resolveSituation(state,openSituationId,situationChoice.dataset.situationChoice);openSituationId=null;refs.situation.classList.remove('visible');state.paused=situationWasPaused;renderAll();showToast('Ответ отправлен. Подрядчик понял его в пределах своей сметы.');}
+  const openSituation=event.target.closest('[data-open-situation]');
+  if(openSituation){const active=(state.activeSituations??[]).find(item=>item.uid===openSituation.dataset.openSituation);if(active)focusSituation(active);}
+  if(event.target.closest('[data-close-modal]'))cancelCurrentOrder();
   if(event.target.closest('[data-close-sidebook]'))event.target.closest('.modal-backdrop').classList.remove('visible');
 });
 
 $('#acceptOrder').addEventListener('click',()=>{
-  const order=orders.find(item=>item.id===selectedOrderId);if(!order)return;if(!selectOrder(state,order)){showToast((order.requiresProjects??0)>ensureOrganization(state).projectsCompleted?'Этот заказ откроется после предыдущей главы.':'Не хватает оборотных денег организации. Вернитесь в меню за кредитом.','risk');feedback('risk');return;}
+  const order=orders.find(item=>item.id===selectedOrderId);if(!order)return;if(!selectOrder(state,order)){const organization=ensureOrganization(state);showToast((order.requiredLevel??1)>organization.playerLevel?`Нужен уровень ${order.requiredLevel}. Улучшайте штаб и закрывайте проекты.`:(order.requiresProjects??0)>organization.projectsCompleted?'Этот заказ откроется после предыдущей главы.':'Не хватает оборотных денег организации. Кредит доступен и в финансах объекта.','risk');feedback('risk');return;}
   visualProfile=createVisualProfile(order.visualSeed,order);
   rebuildTaskMarkers();
   if(sceneProps.client)sceneProps.client.userData.displayName=order.clientPerson;
@@ -1610,8 +1788,10 @@ $('#acceptOrder').addEventListener('click',()=>{
 });
 $('#regenerateOrders').addEventListener('click',()=>{orders=createOrderMarket();state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=ensureOrganization(state).projectsCompleted)?.id??orders[0].id;renderOrders();showToast('Рынок обновлён. Сюжетные заказы остались: рекомендации помнят ваши объекты.');});
 $('#startMission').addEventListener('click',()=>{if(state.contract.cardsPlayed.length!==2)return;state.phase='preparation';refs.brief.classList.remove('visible');refs.market.classList.add('visible');renderPreparation();renderAll();showToast('Контракт подписан. Мелкий шрифт ликует.');});
-$('#enterSite').addEventListener('click',()=>{state.phase='schedule';state.paused=true;refs.market.classList.remove('visible');openMasterSchedule();showToast('Сначала примите общий график. Потом начнётся ежедневный управленческий оптимизм.');});
-$('#acceptSchedule').addEventListener('click',()=>{state.masterScheduleAccepted=true;refs.schedule.classList.remove('visible');if(!state.started){state.started=true;state.phase='planning';state.paused=true;state.needsPlanning=true;state.plannedDay=Math.floor(state.elapsed/24);for(const task of state.tasks)task.enabledToday=false;unlockTasks(state);renderDayPlan();refs.planning.classList.add('visible');showToast('Общий график принят. Утро берёт из него работы дня.','done');}else{state.paused=scheduleWasPaused;showToast('Общий график обновлён. Завершённые работы в планёрку не вернутся.','done');}renderAll();persistGame();});
+$('#confirmPreparationButton').addEventListener('click',()=>{state.preparationConfirmed=true;renderPreparation();persistGame();showToast('Состав подтверждён. На бумаге все уже почти работают.','done');});
+$('#enterSite').addEventListener('click',()=>{if(!state.preparationConfirmed){showToast('Сначала подтвердите состав. Даже если состав — вы и хозбригада.','risk');return;}state.phase='schedule';state.paused=true;refs.market.classList.remove('visible');openMasterSchedule();showToast('Сначала примите общий график. Потом начнётся ежедневный управленческий оптимизм.');});
+$('#cancelPreparationButton').addEventListener('click',cancelCurrentOrder);
+$('#acceptSchedule').addEventListener('click',()=>{state.masterScheduleAccepted=true;refs.schedule.classList.remove('visible');if(eveningEditing){eveningEditing=false;renderEveningScheduleDecision();refs.report.classList.add('visible');showToast('Правки записаны в черновик. Теперь решите, как их провести.','risk');renderAll();persistGame();return;}if(!state.started){state.started=true;state.phase='planning';state.paused=true;state.needsPlanning=true;state.plannedDay=Math.floor(state.elapsed/24);for(const task of state.tasks)task.enabledToday=false;unlockTasks(state);renderDayPlan();refs.planning.classList.add('visible');showToast('Общий график принят. Утро берёт из него работы дня.','done');}else{state.paused=scheduleWasPaused;showToast('Общий график обновлён. Завершённые работы в планёрку не вернутся.','done');}renderAll();persistGame();});
 $('#startDay').addEventListener('click',()=>{if(!state.tasks.some(task=>task.enabledToday&&!['done','active'].includes(task.status))){showToast('Выберите хотя бы одну работу. Даже хаосу нужен старт.','risk');return;}state.needsPlanning=false;state.plannedDay=Math.floor(state.elapsed/24);state.phase='execution';state.paused=false;refs.planning.classList.remove('visible');renderAll();feedback('build');showToast('План отправлен. Площадка реагирует сразу: смотрите, что люди реально делают.','done');});
 $('#whatsappButton').addEventListener('click',()=>openCommunication('whatsapp'));
 $('#emailButton').addEventListener('click',()=>openCommunication('email'));
@@ -1627,11 +1807,11 @@ $('#closeCommunication').addEventListener('click',closeCommunication);
 $('#masterScheduleButton').addEventListener('click',openMasterSchedule);
 $('#topScheduleButton').addEventListener('click',openMasterSchedule);
 $('#closeSchedule').addEventListener('click',closeMasterSchedule);
-$('#closeSituation').addEventListener('click',()=>{refs.situation.classList.remove('visible');openSituationId=null;state.paused=false;showToast('Вопрос оставлен висеть над человеком. Буквально.');});
-$('#sendReport').addEventListener('click',()=>{const day=Math.floor(state.elapsed/24);const dailyCost=closeDayFinances(state);state.reportedDay=day;state.elapsed=(day+1)*24;state.needsReport=false;state.needsPlanning=true;state.paused=true;for(const task of state.tasks)task.enabledToday=false;refs.report.classList.remove('visible');renderDayPlan();refs.planning.classList.add('visible');showToast(`Отчёт ушёл. За день списано ${money(dailyCost)}. Ночной бесплатной смены нет.`,'done');});
+$('#closeSituation').addEventListener('click',()=>{refs.situation.classList.remove('visible');openSituationId=null;state.paused=situationWasPaused;showToast('Вопрос оставлен висеть над человеком. Буквально.');});
+$('#sendReport').addEventListener('click',()=>{const day=Math.floor(state.elapsed/24);const revision=resolveScheduleRevision(state,selectedScheduleRoute??'restore',eveningScheduleSnapshot);const dailyCost=closeDayFinances(state);state.reportedDay=day;state.elapsed=(day+1)*24;state.needsReport=false;state.needsPlanning=true;state.paused=true;for(const task of state.tasks)task.enabledToday=false;refs.report.classList.remove('visible');eveningScheduleSnapshot=null;eveningScheduleDay=-1;selectedScheduleRoute=null;renderDayPlan();refs.planning.classList.add('visible');const revisionText=revision.changed?(revision.mode==='client'?(revision.approved?' Заказчик согласовал новую версию графика.':' Заказчик отклонил правки — вернули базу.'):(revision.mode==='secret'?(revision.detected?' Тайную правку заметили.':' Тихая версия графика вступила в силу.'):' Правки отменены.')):'';showToast(`Отчёт ушёл. За день списано ${money(dailyCost)}.${revisionText}`,'done');persistGame();});
 $('#briefButton').addEventListener('click',()=>state.selectedOrder?refs.brief.classList.add('visible'):refs.orders.classList.add('visible'));
 $('#pauseButton').addEventListener('click',()=>{if(!state.started)return;state.paused=!state.paused;renderHud();});
-$('#sitePauseButton').addEventListener('click',()=>{if(!state.started)return;state.paused=!state.paused;renderHud();});
+$('#endDayButton').addEventListener('click',()=>{if(!state.started||state.completed){showToast('Сначала выйдите на объект. Заканчивать рынок заказов рано.','risk');return;}state.paused=true;state.needsReport=true;openReport();renderHud();persistGame();showToast('Смена остановлена. Вечерний Excel уже требует внимания.','risk');});
 $('#soundToggle').addEventListener('click',()=>{audioEnabled=!audioEnabled;$('#soundToggle').textContent=audioEnabled?'♪':'×';$('#soundToggle').title=audioEnabled?'Звук включён':'Звук выключен';if(audioEnabled)playSound('click');});
 $('#skipTutorial').addEventListener('click',()=>{if(state.tutorial){state.tutorial.active=false;state.tutorial.completed=true;}renderTutorial();persistGame();showToast('Обучение пропущено. События снова имеют доступ к объекту.','risk');});
 $('#developHqButton').addEventListener('click',()=>{const outcome=developHeadquarters(state);if(!outcome.ok){showToast('На офис для себя снова не хватило денег. Символично.','risk');return;}feedback(outcome.success?'done':'risk');renderMainMenu();persistGame();showToast(outcome.success?`Собственный офис улучшен: ${outcome.title}.`:`Потрачено ${money(outcome.cost)}. ${outcome.lastFailure}`,outcome.success?'done':'risk');});
@@ -1639,7 +1819,8 @@ document.querySelectorAll('[data-speed]').forEach(button=>button.addEventListene
 $('#zoomIn').addEventListener('click',()=>{cameraZoom=Math.min(1.65,cameraZoom+.12);updateCamera();});
 $('#zoomOut').addEventListener('click',()=>{cameraZoom=Math.max(.72,cameraZoom-.12);updateCamera();});
 $('#zoomReset').addEventListener('click',()=>{cameraAngle=Math.PI/4;cameraZoom=1;updateCamera();});
-function resetGame(){const hq=state.hq;const organization=ensureOrganization(state);state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.organization=organization;saved=null;orders=createOrderMarket(organization);state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0].id;visualProfile=createVisualProfile(1);unlockTasks(state);renderedLogLength=0;resultShown=false;selectedPerson=null;for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();}
+function resetGame(){const hq=state.hq;const playerAvatar=state.playerAvatar;const organization=ensureOrganization(state);state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.playerAvatar=playerAvatar;state.organization=organization;ensureWorkforceMarket(state);saved=null;eveningScheduleSnapshot=null;eveningScheduleDay=-1;eveningEditing=false;selectedScheduleRoute=null;orders=createOrderMarket(organization);state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0].id;visualProfile=createVisualProfile(1);unlockTasks(state);renderedLogLength=0;resultShown=false;clearCrewMeshes();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();}
+function cancelCurrentOrder(){if(state.started){showToast('После выхода на площадку отказаться можно только через «сохранить и выйти».','risk');return;}const organization=ensureOrganization(state);const refund=Math.round((state.organizationMobilization??0)*.5);organization.cash+=refund;const hq=state.hq;const playerAvatar=state.playerAvatar;const currentOrders=orders;state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.playerAvatar=playerAvatar;state.organization=organization;ensureWorkforceMarket(state);state.orderOptions=currentOrders;orders=currentOrders;selectedOrderId=orders.find(order=>(order.requiredLevel??1)<=organization.playerLevel&&(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0]?.id;saved=null;visualProfile=createVisualProfile(1);renderedLogLength=0;resultShown=false;clearCrewMeshes();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();showToast(`От заказа отказались. Вернули ${money(refund)}, остальное ушло в опыт переговоров.`,'risk');}
 $('#resetButton').addEventListener('click',resetGame);
 $('#playAgain').addEventListener('click',()=>{refs.result.classList.remove('visible');saved=null;renderMainMenu();refs.menu.classList.add('visible');});
 $('#continueGameButton').addEventListener('click',()=>{if(saved)resumePlayerGame();});
@@ -1651,13 +1832,14 @@ function frame(now) {
   if(state.log.length>renderedLogLength){for(const item of state.log.slice(renderedLogLength)){showToast(item.text,item.type);if(item.type==='start')feedback('build');else if(item.type==='done')feedback('done');else if(item.type==='risk'||item.type==='event')feedback('risk');}renderedLogLength=state.log.length;renderAll();}
   const planningBlocked=[refs.auth,refs.menu,refs.orders,refs.brief,refs.market,refs.schedule,refs.communication,refs.team,refs.finance,refs.docs,refs.report,refs.situation,refs.result].some(modal=>modal?.classList.contains('visible'));
   if(state.needsPlanning&&!planningBlocked&&!refs.planning.classList.contains('visible')){renderDayPlan();refs.planning.classList.add('visible');}
-  if(state.needsReport)openReport();
+  if(state.needsReport&&!refs.auth.classList.contains('visible')&&!refs.menu.classList.contains('visible')&&!refs.orders.classList.contains('visible'))openReport();
   const managementOpen=[refs.auth,refs.menu,refs.orders,refs.brief,refs.market,refs.communication,refs.schedule,refs.team,refs.finance,refs.docs,refs.planning,refs.report,refs.situation,refs.result].some(modal=>modal?.classList.contains('visible'));
   if(state.eventQueue.length&&!eventShowing&&!refs.event.classList.contains('visible')&&!managementOpen)openEvent(state.eventQueue[0]);
   if(state.completed)showResult();
   renderHud();renderTutorial();syncSceneFromState();animateScene(now);resizeRenderer();updateCamera(now*.001);
   if(cameraKick>.005){camera.position.x+=Math.sin(now*.11)*cameraKick;camera.position.y+=Math.cos(now*.09)*cameraKick*.35;camera.lookAt(cameraTarget);cameraKick*=.86;}
   renderer.render(scene,camera);
+  renderHqPreview(now);
   if(now-lastSaved>2500){persistGame();lastSaved=now;}
   requestAnimationFrame(frame);
 }

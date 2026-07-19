@@ -26,14 +26,15 @@ test('a situation stays over a crew when there is no team to answer it',()=>{
   assert.ok(state.activeSituations[0].crewId);
 });
 
-test('a hired team automatically resolves some incoming questions',()=>{
+test('a hired team visibly takes ownership before auto-resolving some questions',()=>{
   let autoSolved=false;
   for(let seed=1;seed<120&&!autoSolved;seed+=1){
     const state=createInitialState();
     state.visualSeed=seed;state.started=true;state.paused=false;state.plannedDay=0;state.nextSituationAt=0;
     state.team.forEach(member=>{member.hired=true;});
     tickState(state,.05);
-    autoSolved=state.log.some(entry=>entry.text.includes('сам(а) решил(а)'));
+    const delegated=state.activeSituations.find(item=>item.delegated);
+    if(delegated){state.elapsed=delegated.autoResolveAt;tickState(state,.01);autoSolved=state.log.some(entry=>entry.text.includes('Команда решила'));}
   }
   assert.equal(autoSolved,true);
 });

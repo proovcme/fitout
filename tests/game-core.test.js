@@ -3,14 +3,26 @@ import assert from 'node:assert/strict';
 import {
   applyEventChoice,
   applyCatalogEventChoice,
+  advanceOrganizationDays,
+  captureMasterSchedule,
   createInitialState,
   cyclePriority,
   developHeadquarters,
+  dismissContractor,
+  ensureRuntimeCrews,
+  forceAssignCrew,
   hireContractor,
   hireTeamMember,
   selectOrder,
+  requestClientFunding,
+  resolveScheduleRevision,
+  sendPressureInstruction,
+  sendContractorEscalation,
+  submitTaskForAcceptance,
   takeOrganizationLoan,
   tickState,
+  unhireContractor,
+  unhireTeamMember,
   unlockTasks,
 } from '../game-core.js';
 import { allRandomEvents } from '../events/index.js';
@@ -21,6 +33,11 @@ test('only dependency-free work unlocks initially', () => {
   unlockTasks(state);
   assert.equal(state.tasks.find((task) => task.id === 'survey').status, 'ready');
   assert.equal(state.tasks.find((task) => task.id === 'paint').status, 'locked');
+});
+
+test('old saves receive the player avatar and universal company crew',()=>{
+  const legacy={crews:[{id:'foreman',name:'Вы',skill:'management'}]};ensureRuntimeCrews(legacy);
+  assert.ok(legacy.crews.some(crew=>crew.id==='general-crew'));assert.equal(legacy.playerAvatar.helmet,'classic');assert.equal(legacy.playerZoneTaskId,null);
 });
 
 test('hiring deducts mobilization and creates an autonomous crew', () => {
@@ -69,9 +86,9 @@ test('market incident is randomized but reproducible for tests', () => {
 
 test('a well-staffed mission is winnable inside the budget and deadline', () => {
   const state = createInitialState(() => 0); // noise is the second incident
-  for (const contractor of state.contractors) assert.equal(hireContractor(state, contractor.id).ok, true);
-  for(const member of state.team)assert.equal(hireTeamMember(state,member.id).ok,true);
   state.budget += 1000;
+  for (const contractor of state.contractors.filter(item=>item.contractClass==='standard')) assert.equal(hireContractor(state, contractor.id).ok, true);
+  for(const member of state.team)assert.equal(hireTeamMember(state,member.id).ok,true);
   state.contract.budget += 1000;
   state.started = true;
   state.paused = false;
@@ -79,6 +96,7 @@ test('a well-staffed mission is winnable inside the budget and deadline', () => 
   for (const task of state.tasks) task.enabledToday = true;
   for (let hour = 0; hour < 72 && !state.completed; hour += 1) {
     tickState(state, 1);
+    for(const task of state.tasks.filter(item=>item.status==='awaiting'))submitTaskForAcceptance(state,task.id,()=>0);
     if (state.needsReport) { state.reportedDay = Math.floor(state.elapsed / 24); state.needsReport = false; state.paused = false; }
     if (state.needsPlanning) {
       state.plannedDay = Math.floor(state.elapsed / 24); state.needsPlanning = false; state.paused = false;
@@ -105,13 +123,17 @@ test('bad sequencing creates visible and costly rework', () => {
   assert.ok(state.quality<74);
 });
 
-test('event catalog contains 50 unique two-choice incidents', () => {
-  assert.equal(allRandomEvents.length, 50);
-  assert.equal(new Set(allRandomEvents.map((event) => event.id)).size, 50);
+test('event catalog contains 54 unique two-choice incidents including good news', () => {
+  assert.equal(allRandomEvents.length, 54);
+  assert.equal(new Set(allRandomEvents.map((event) => event.id)).size, 54);
+  assert.ok(allRandomEvents.filter((event)=>event.beneficial).length>=4);
   for (const event of allRandomEvents) {
     assert.match(event.id, /^[a-z0-9-]+$/);
     assert.equal(event.options.length, 2);
-    for (const option of event.options) assert.deepEqual(Object.keys(option.deltas).sort(), ['budget', 'quality', 'time', 'trust']);
+    for (const option of event.options) {
+      for(const key of ['budget','quality','time','trust'])assert.ok(key in option.deltas);
+      assert.ok(Object.keys(option.deltas).every(key=>['budget','deadline','quality','time','trust'].includes(key)));
+    }
   }
 });
 
@@ -123,6 +145,33 @@ test('catalog choice can remove a crew and create a temporary 3D scene effect', 
   assert.ok(state.crews.find((crew) => crew.skill === 'moving').unavailableUntil > state.elapsed);
   assert.equal(state.sceneEffect.actor, 'inspector');
   assert.equal(state.sceneEffect.actorCount, 2);
+});
+
+test('good news can add budget or extend the contractual deadline',()=>{
+  const state=createInitialState();const event=allRandomEvents.find(item=>item.id==='client-extends-deadline');const before=state.contract.deadlineHours;
+  assert.equal(applyCatalogEventChoice(state,event,'accept-extension'),true);
+  assert.equal(state.contract.deadlineHours,before+12);
+  const extra=allRandomEvents.find(item=>item.id==='client-approved-extras');const contractBefore=state.finance.contractValue;
+  assert.equal(applyCatalogEventChoice(state,extra,'take-and-document'),true);assert.equal(state.finance.contractValue,contractBefore+120);
+});
+
+test('major incidents are serialized and capped at five per project day',()=>{
+  const state=createInitialState();state.started=true;state.paused=false;state.tutorial=null;state.nextSituationAt=999;
+  state.eventSchedule=Array.from({length:6},()=>({id:'client-approved-extras',hour:0,occurs:true}));
+  for(let index=0;index<6;index+=1){state.nextMajorEventAt=state.elapsed;tickState(state,.01);if(state.eventQueue.length)applyCatalogEventChoice(state,allRandomEvents.find(item=>item.id==='client-approved-extras'),'take-and-document');state.paused=false;}
+  assert.equal(state.eventCountsByDay[0],5);assert.equal(state.eventQueue.length,0);
+});
+
+test('major incidents keep a visible gameplay interval between decisions',()=>{
+  const state=createInitialState();state.started=true;state.paused=false;state.tutorial=null;state.nextSituationAt=999;state.eventSchedule=[{id:'client-approved-extras',hour:0,occurs:true},{id:'client-extends-deadline',hour:0,occurs:true}];
+  tickState(state,.01);assert.equal(state.eventQueue.length,1);const first=allRandomEvents.find(item=>item.id===state.eventQueue[0]);applyCatalogEventChoice(state,first,first.options[0].id);state.paused=false;tickState(state,.1);assert.equal(state.eventQueue.length,0);state.paused=false;tickState(state,.6);assert.equal(state.eventQueue.length,1);
+});
+
+test('the player avatar boosts only the supervised work zone',()=>{
+  const makeState=()=>{const state=createInitialState();state.started=true;state.paused=false;state.nextSituationAt=999;state.eventSchedule=[];unlockTasks(state);const survey=state.tasks.find(task=>task.id==='survey');survey.enabledToday=true;return state;};
+  const nearby=makeState();nearby.playerZoneTaskId='survey';tickState(nearby,.2);
+  const away=makeState();away.playerZoneTaskId='paint';tickState(away,.2);
+  assert.ok(nearby.tasks.find(task=>task.id==='survey').progress>away.tasks.find(task=>task.id==='survey').progress*1.17);
 });
 
 test('client funds the project by advance and completed schedule stages', () => {
@@ -144,7 +193,7 @@ test('organization carries project profit and interest-bearing debt between proj
   const loan=takeOrganizationLoan(state,300);
   assert.equal(loan.ok,true);
   assert.equal(state.organization.cash,620);
-  assert.equal(state.organization.debt,348);
+  assert.equal(state.organization.debt,loan.repayment);
   state.started=true;state.paused=false;state.budget=-50;
   for(const task of state.tasks)task.status='done';
   tickState(state,.1);
@@ -183,4 +232,93 @@ test('developing the company office spends organization cash and can visibly imp
   assert.equal(result.ok,true);assert.equal(result.success,true);
   assert.equal(state.organization.cash,before-result.cost);
   assert.equal(state.hq.level,1);
+});
+
+test('a project loan arrives on site and is collected from organization cash every month',()=>{
+  const state=createInitialState();state.started=true;state.completed=false;state.selectedOrder={id:'test'};state.phase='execution';const projectCash=state.budget;
+  const loan=takeOrganizationLoan(state,300);
+  assert.equal(loan.recipient,'project');assert.equal(state.budget,projectCash+300);
+  state.organization.cash=loan.monthlyPayment+20;
+  const month=advanceOrganizationDays(state,30);
+  assert.equal(month.paid,loan.monthlyPayment);assert.equal(state.organization.cash,20);
+  assert.equal(state.organization.debt,loan.repayment-loan.monthlyPayment);
+});
+
+test('a headquarters loan goes to company cash even when a project save exists',()=>{
+  const state=createInitialState();state.started=true;state.selectedOrder={id:'active'};state.phase='execution';const companyCash=state.organization.cash;const projectCash=state.budget;
+  const loan=takeOrganizationLoan(state,300,'organization');assert.equal(loan.recipient,'organization');assert.equal(state.organization.cash,companyCash+300);assert.equal(state.budget,projectCash);
+});
+
+test('an unpaid monthly loan creates arrears and damages reputation',()=>{
+  const state=createInitialState();const loan=takeOrganizationLoan(state,300);state.organization.cash=0;const reputation=state.organization.reputation;
+  const month=advanceOrganizationDays(state,30);
+  assert.equal(month.missed,loan.monthlyPayment);assert.ok(state.organization.arrears>0);assert.equal(state.organization.reputation,reputation-4);
+});
+
+test('repeated loan default reports current arrears without double counting old debt',()=>{
+  const state=createInitialState();takeOrganizationLoan(state,300);state.organization.cash=0;advanceOrganizationDays(state,30);advanceOrganizationDays(state,30);
+  assert.equal(state.organization.arrears,state.organization.loans.reduce((sum,loan)=>sum+(loan.arrears??0),0));
+});
+
+test('finished work must be presented before its stage payment is released',()=>{
+  const state=createInitialState();state.finance.received=500;const task=state.tasks.find(item=>item.id==='paint');task.status='awaiting';task.progress=1;task.acceptanceQuality=1;task.acceptanceQualityGain=4;task.lastCrewLevel=1;
+  const received=state.finance.received;const rejected=submitTaskForAcceptance(state,task.id,()=>1);
+  assert.equal(rejected.accepted,false);assert.equal(task.status,'ready');assert.ok(task.progress>0);assert.equal(rejected.remainingHours,4.5);assert.equal(state.finance.received,received);
+  task.status='awaiting';task.progress=1;const accepted=submitTaskForAcceptance(state,task.id,()=>0);
+  assert.equal(accepted.accepted,true);assert.equal(task.status,'done');assert.ok(state.finance.received>received);
+});
+
+test('evening schedule can be approved, rejected or quietly discovered',()=>{
+  const state=createInitialState();state.started=true;const snapshot=captureMasterSchedule(state);state.tasks.find(item=>item.id==='paint').plannedStartDay=0;
+  const approved=resolveScheduleRevision(state,'client',snapshot,()=>0);assert.equal(approved.approved,true);
+  const state2=createInitialState();state2.started=true;const snapshot2=captureMasterSchedule(state2);state2.tasks.find(item=>item.id==='paint').plannedStartDay=0;
+  const rejected=resolveScheduleRevision(state2,'client',snapshot2,()=>1);assert.equal(rejected.approved,false);assert.equal(rejected.restored,true);
+});
+
+test('government fixed contracts reject extra money and punish hidden schedule changes',()=>{
+  const state=createInitialState();state.started=true;state.selectedOrder={fixedContract:true};
+  assert.equal(requestClientFunding(state,()=>0).reason,'fixed-contract');
+  const snapshot=captureMasterSchedule(state);state.tasks.find(item=>item.id==='paint').plannedStartDay=0;
+  const result=resolveScheduleRevision(state,'secret',snapshot,()=>0);
+  assert.equal(result.detected,true);assert.equal(state.sceneEffect.actor,'police');assert.ok(state.budget<1180);
+});
+
+test('contractor classes trade price for speed and replacements arrive next day',()=>{
+  const state=createInitialState();const economy=state.contractors.find(item=>item.id==='painters-economy');const premium=state.contractors.find(item=>item.id==='painters-premium');
+  assert.ok(economy.price<premium.price);assert.ok(economy.speed<premium.speed);assert.ok(economy.quality<premium.quality);
+  state.started=true;state.needsReport=true;assert.equal(hireContractor(state,economy.id).ok,true);assert.equal(dismissContractor(state,economy.id).ok,true);
+  const replacement=hireContractor(state,premium.id);assert.equal(replacement.ok,true);assert.equal(replacement.arrivalAt,24);
+});
+
+test('chat pressure is repeatable while a hard email is limited to once per day',()=>{
+  const state=createInitialState();const task=state.tasks.find(item=>item.id==='paint');
+  const chat=sendPressureInstruction(state,task.id,'chat',()=>0);assert.equal(chat.worked,true);assert.equal(task.pressureFactor,1.2);
+  const email=sendPressureInstruction(state,task.id,'email',()=>0);assert.equal(email.worked,true);assert.equal(task.pressureFactor,1.38);
+  assert.equal(sendPressureInstruction(state,task.id,'email',()=>0).reason,'daily-limit');
+});
+
+test('the company general crew can cover every trade slowly and specialists can be forced off profile',()=>{
+  const state=createInitialState();state.started=true;const general=state.crews.find(item=>item.id==='general-crew');const paint=state.tasks.find(item=>item.id==='paint');paint.status='ready';
+  const assigned=forceAssignCrew(state,general.id,paint.id);assert.equal(assigned.ok,true);assert.equal(assigned.mismatch,true);
+  assert.equal(paint.profileMismatch,true);
+});
+
+test('final client retention is released only after documentation and inspection',()=>{
+  const state=createInitialState();state.started=true;state.paused=false;state.finance.contractValue=1000;state.finance.received=850;state.budget=0;
+  for(const task of state.tasks)task.status='done';const inspect=state.tasks.find(item=>item.id==='inspect');inspect.status='active';inspect.progress=.99;inspect.crewId='foreman';state.crews.find(item=>item.id==='foreman').taskId='inspect';
+  tickState(state,1);assert.ok(state.finance.ledger.some(row=>row.category==='Финальное закрытие'));assert.equal(state.finance.received,1000);
+});
+
+test('preparation hires can be revoked and use company cash after the advance',()=>{
+  const state=createInitialState();state.phase='preparation';state.selectedOrder={id:'test'};state.budget=10;state.organization.cash=200;
+  const hired=hireContractor(state,'painters');assert.equal(hired.ok,true);assert.equal(state.budget,0);assert.equal(state.organization.cash,142);
+  const revoked=unhireContractor(state,'painters');assert.equal(revoked.ok,true);assert.equal(state.budget,10);assert.equal(state.organization.cash,200);
+  assert.equal(hireTeamMember(state,'designer').ok,true);assert.equal(unhireTeamMember(state,'designer').ok,true);
+});
+
+test('hard mail targets one contractor or the whole hired pool once per day',()=>{
+  const state=createInitialState();state.started=true;state.phase='execution';state.budget=500;hireContractor(state,'painters');hireContractor(state,'electricians');
+  state.crews.find(item=>item.id==='crew-painters').unavailableUntil=0;state.crews.find(item=>item.id==='crew-electricians').unavailableUntil=0;
+  const result=sendContractorEscalation(state,'painters',()=>0);assert.equal(result.worked,true);assert.equal(result.targetCount,1);
+  assert.equal(sendContractorEscalation(state,'all',()=>0).reason,'daily-limit');
 });
