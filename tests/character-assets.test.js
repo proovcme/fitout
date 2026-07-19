@@ -12,6 +12,10 @@ test('all rigged character assets are valid GLB 2 containers',async()=>{
     const header=await readFile(path,{encoding:null});
     assert.equal(header.subarray(0,4).toString('ascii'),'glTF');
     assert.equal(header.readUInt32LE(4),2);
+    const jsonLength=header.readUInt32LE(12);
+    const gltf=JSON.parse(header.subarray(20,20+jsonLength).toString('utf8').trim());
+    assert.equal(gltf.textures,undefined,`${file} must not require blob textures under the production CSP`);
+    assert.equal(gltf.images,undefined,`${file} must keep its colors as native materials`);
   }
 });
 
