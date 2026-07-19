@@ -25,6 +25,14 @@ test('character asset provenance is shipped with the game',async()=>{
   assert.match(license,/CC0-1\.0/);
 });
 
+test('curated office props are compact GLB 2 assets with provenance',async()=>{
+  const propFiles=['desk.glb','chair-desk.glb','laptop.glb','lounge-sofa.glb','bookcase.glb','coffee-machine.glb','plant.glb'];
+  let total=0;
+  for(const file of propFiles){const path=new URL(`../public/assets/props/kenney-furniture/${file}`,import.meta.url);const info=await stat(path);total+=info.size;const header=await readFile(path,{encoding:null});assert.equal(header.subarray(0,4).toString('ascii'),'glTF');assert.equal(header.readUInt32LE(4),2);}
+  assert.ok(total<250_000,`mobile prop payload should stay compact, got ${total} bytes`);
+  const license=await readFile(new URL('../public/assets/props/kenney-furniture/LICENSE.md',import.meta.url),'utf8');assert.match(license,/Kenney Furniture Kit/);assert.match(license,/CC0 1\.0/);
+});
+
 test('encounter chatter contains at least sixty two-line exchanges',async()=>{
   const source=await readFile(new URL('../game.js',import.meta.url),'utf8');
   const block=source.split('const ENCOUNTER_DIALOGUES=')[1]?.split('let activeEncounterDialogue')[0]??'';

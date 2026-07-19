@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  adjustContractorManpower,
   applyEventChoice,
   applyCatalogEventChoice,
   advanceOrganizationDays,
   captureMasterSchedule,
+  calculateSiteCongestion,
+  closeDayFinances,
   createInitialState,
+  crewHeadcount,
   cyclePriority,
   developHeadquarters,
   dismissContractor,
@@ -18,12 +22,16 @@ import {
   resolveScheduleRevision,
   sendPressureInstruction,
   sendContractorEscalation,
+  skipOptionalTask,
   submitTaskForAcceptance,
   takeOrganizationLoan,
   tickState,
+  toggleInHouseDesign,
+  tryMagicResolve,
   unhireContractor,
   unhireTeamMember,
   unlockTasks,
+  updateSiteCleanliness,
 } from '../game-core.js';
 import { allRandomEvents } from '../events/index.js';
 import { createCampaignOrders, generateOrders, makeSeededRng } from '../order-generator.js';
@@ -36,8 +44,9 @@ test('only dependency-free work unlocks initially', () => {
 });
 
 test('old saves receive the player avatar and universal company crew',()=>{
-  const legacy={crews:[{id:'foreman',name:'Вы',skill:'management'}]};ensureRuntimeCrews(legacy);
+  const legacy=createInitialState();const pm=legacy.team.find(member=>member.id==='pm');pm.hired=true;Object.assign(legacy.crews.find(crew=>crew.id==='foreman'),{name:'Алина Ветрова',role:'Руководитель проекта',initials:'АВ'});legacy.crews=legacy.crews.filter(crew=>crew.id!=='team-pm');ensureRuntimeCrews(legacy);
   assert.ok(legacy.crews.some(crew=>crew.id==='general-crew'));assert.equal(legacy.playerAvatar.helmet,'classic');assert.equal(legacy.playerZoneTaskId,null);
+  assert.equal(legacy.crews.find(crew=>crew.id==='foreman').name,'Вы');assert.equal(legacy.crews.find(crew=>crew.id==='team-pm').name,'Алина Ветрова');
 });
 
 test('hiring deducts mobilization and creates an autonomous crew', () => {
@@ -47,6 +56,17 @@ test('hiring deducts mobilization and creates an autonomous crew', () => {
   assert.equal(state.budget, 1112);
   assert.equal(state.crews.at(-1).skill, 'paint');
   assert.equal(hireContractor(state, 'painters').ok, false);
+});
+
+test('contractor headcount is explicit, crowds small sites and can be adjusted',()=>{
+  const state=createInitialState();state.selectedOrder={area:180};state.budget=2000;
+  for(const id of ['movers','painters','electricians'])assert.equal(hireContractor(state,id).ok,true);
+  const painters=state.contractors.find(item=>item.id==='painters');const crew=state.crews.find(item=>item.id==='crew-painters');
+  assert.equal(crewHeadcount(state,crew),painters.manpower);assert.ok(calculateSiteCongestion(state).penalty<1);
+  state.started=true;state.paused=false;state.elapsed=23.99;state.plannedDay=1;state.reportedDay=1;state.nextMajorEventAt=999;state.eventSchedule=[];
+  const reinforced=adjustContractorManpower(state,'painters',1);assert.equal(reinforced.pending,true);assert.equal(crewHeadcount(state,crew),4);assert.equal(crew.pendingManpower,1);
+  tickState(state,.02);assert.equal(crewHeadcount(state,crew),5);assert.equal(crew.pendingManpower,0);
+  assert.equal(adjustContractorManpower(state,'painters',-1).ok,true);assert.equal(crewHeadcount(state,crew),4);
 });
 
 test('foreman automatically completes survey and unlocks parallel work', () => {
@@ -87,14 +107,15 @@ test('market incident is randomized but reproducible for tests', () => {
 test('a well-staffed mission is winnable inside the budget and deadline', () => {
   const state = createInitialState(() => 0); // noise is the second incident
   state.budget += 1000;
-  for (const contractor of state.contractors.filter(item=>item.contractClass==='standard')) assert.equal(hireContractor(state, contractor.id).ok, true);
+  for (const contractorId of ['movers','painters','electricians','assemblers','cleaners']) assert.equal(hireContractor(state, contractorId).ok, true);
   for(const member of state.team)assert.equal(hireTeamMember(state,member.id).ok,true);
   state.contract.budget += 1000;
+  state.contract.deadlineHours = 96;
   state.started = true;
   state.paused = false;
   state.eventsSeen = ['paint-change','random-0','random-1','random-2','random-3','random-4','random-5'];
   for (const task of state.tasks) task.enabledToday = true;
-  for (let hour = 0; hour < 72 && !state.completed; hour += 1) {
+  for (let hour = 0; hour < state.contract.deadlineHours && !state.completed; hour += 1) {
     tickState(state, 1);
     for(const task of state.tasks.filter(item=>item.status==='awaiting'))submitTaskForAcceptance(state,task.id,()=>0);
     if (state.needsReport) { state.reportedDay = Math.floor(state.elapsed / 24); state.needsReport = false; state.paused = false; }
@@ -104,7 +125,7 @@ test('a well-staffed mission is winnable inside the budget and deadline', () => 
     }
   }
   assert.equal(state.completed, true);
-  assert.ok(state.elapsed <= 72);
+  assert.ok(state.elapsed <= state.contract.deadlineHours);
   assert.ok(state.budget >= 0);
   assert.ok(state.quality >= 78);
 });
@@ -183,7 +204,7 @@ test('client funds the project by advance and completed schedule stages', () => 
   assert.equal(state.finance.received,advance);
   state.started=true;state.paused=false;
   state.tasks.find(task=>task.id==='survey').enabledToday=true;
-  tickState(state,8);
+  for(let hour=0;hour<48&&!state.finance.ledger.some(row=>row.category==='Этапный платёж');hour+=1){tickState(state,1);if(state.needsReport){state.reportedDay=Math.floor(state.elapsed/24);state.needsReport=false;}if(state.needsPlanning){state.plannedDay=Math.floor(state.elapsed/24);state.needsPlanning=false;state.tasks.find(task=>task.id==='survey').enabledToday=true;}state.paused=false;}
   assert.ok(state.finance.ledger.some(row=>row.category==='Этапный платёж'));
   assert.ok(state.finance.received>advance);
 });
@@ -268,6 +289,11 @@ test('finished work must be presented before its stage payment is released',()=>
   assert.equal(accepted.accepted,true);assert.equal(task.status,'done');assert.ok(state.finance.received>received);
 });
 
+test('the working design is produced by a designer and must be presented',()=>{
+  const state=createInitialState();assert.equal(hireTeamMember(state,'designer').ok,true);state.started=true;state.paused=false;state.nextSituationAt=999;state.eventSchedule=[];const survey=state.tasks.find(task=>task.id==='survey');survey.status='done';const project=state.tasks.find(task=>task.id==='project');project.status='ready';project.enabledToday=true;project.duration=1;tickState(state,2);
+  assert.equal(project.status,'awaiting');assert.equal(project.lastCrewId,'team-designer');assert.equal(submitTaskForAcceptance(state,project.id,()=>0).accepted,true);
+});
+
 test('evening schedule can be approved, rejected or quietly discovered',()=>{
   const state=createInitialState();state.started=true;const snapshot=captureMasterSchedule(state);state.tasks.find(item=>item.id==='paint').plannedStartDay=0;
   const approved=resolveScheduleRevision(state,'client',snapshot,()=>0);assert.equal(approved.approved,true);
@@ -321,4 +347,27 @@ test('hard mail targets one contractor or the whole hired pool once per day',()=
   state.crews.find(item=>item.id==='crew-painters').unavailableUntil=0;state.crews.find(item=>item.id==='crew-electricians').unavailableUntil=0;
   const result=sendContractorEscalation(state,'painters',()=>0);assert.equal(result.worked,true);assert.equal(result.targetCount,1);
   assert.equal(sendContractorEscalation(state,'all',()=>0).reason,'daily-limit');
+});
+
+test('a site may accumulate rubbish and late professional cleaning recovers it',()=>{
+  const state=createInitialState();const move=state.tasks.find(item=>item.id==='move');const general=state.crews.find(item=>item.id==='general-crew');move.status='active';move.crewId=general.id;general.taskId=move.id;
+  updateSiteCleanliness(state,24);assert.ok(state.siteDirt>18);assert.ok(state.cleanliness.distraction<1);
+  const cleaner=state.contractors.find(item=>item.id==='cleaners-premium');assert.equal(hireContractor(state,cleaner.id).ok,true);const crew=state.crews.find(item=>item.id===`crew-${cleaner.id}`);const clean=state.tasks.find(item=>item.id==='clean');clean.status='active';clean.crewId=crew.id;crew.taskId=clean.id;
+  updateSiteCleanliness(state,8);assert.equal(state.siteDirt,0);assert.equal(state.cleanliness.hasCleaningSupport,true);
+});
+
+test('magic resolve is rare, useful and has a two-day cooldown',()=>{
+  const state=createInitialState();state.started=true;const task=state.tasks.find(item=>item.id==='paint');task.status='awaiting';task.acceptanceQualityGain=4;
+  const rolls=[0,.1];const success=tryMagicResolve(state,()=>rolls.shift());assert.equal(success.success,true);assert.equal(success.outcome,'acceptance');assert.equal(task.status,'done');assert.equal(tryMagicResolve(state,()=>0).reason,'cooldown');
+  state.elapsed+=48;const failure=tryMagicResolve(state,()=>.99);assert.equal(failure.success,false);assert.equal(state.magicResolve.attempts,2);
+});
+
+test('optional protection may be skipped for immediate savings and later dirt',()=>{
+  const state=createInitialState();const generated=generateOrders(makeSeededRng(51),1)[0];state.tasks=generated.tasks;const protection=state.tasks.find(task=>task.id==='protection');assert.ok(protection?.optional);const quality=state.quality;
+  const result=skipOptionalTask(state,'protection');assert.equal(result.ok,true);assert.equal(protection.status,'skipped');assert.equal(state.siteDirt,18);assert.ok(state.quality<quality);
+});
+
+test('an in-house design office replaces a contractor and adds daily overhead',()=>{
+  const state=createInitialState();state.hq.level=2;state.organization.cash=500;const hired=toggleInHouseDesign(state);assert.equal(hired.ok,true);assert.ok(state.crews.some(crew=>crew.id==='inhouse-design'));const budget=state.budget;closeDayFinances(state);assert.ok(state.budget<=budget-18);assert.match(state.finance.ledger[0].text,/постоянный штат 12К/);
+  assert.equal(toggleInHouseDesign(state).active,false);assert.ok(!state.crews.some(crew=>crew.id==='inhouse-design'));
 });

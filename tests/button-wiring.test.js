@@ -17,7 +17,21 @@ test('every delegated button family has a matching click route',()=>{
   const delegated=[
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
-    'task','priority','hire','event-choice','situation-choice','close-modal','close-sidebook',
+    'task','priority','start-task','skip-task','hire','contract-manpower','event-choice','situation-choice','close-modal','close-sidebook',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
+});
+
+test('selected player has click-to-move navigation and never joins idle wandering',()=>{
+  assert.match(script,/navigationPoint&&selectedPerson\?\.userData\?\.role==='player'/);
+  assert.match(script,/playerMoveTarget=destination/);
+  assert.match(script,/const count=crewHeadcount\(state,crew\)/);
+  assert.match(script,/const isPlayerCrew=crew\.id==='foreman'/);
+  const patrolLine=script.match(/const patrol=[^;]+;/)?.[0]??'';
+  assert.doesNotMatch(patrolLine,/crew\.id==='foreman'/);
+});
+
+test('site animation time advances only while the simulation is unpaused',()=>{
+  assert.match(script,/if\(!state\.paused\)sceneAnimationTime\+=frameDelta/);
+  assert.match(script,/const characterDelta=state\.paused\?0:frameDelta/);
 });

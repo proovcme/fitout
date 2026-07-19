@@ -6,9 +6,11 @@ import {
   applyEventChoice,
   applyCatalogEventChoice,
   applyContractCard,
+  adjustContractorManpower,
   attemptHqUpgrade,
   captureMasterSchedule,
   closeDayFinances,
+  crewHeadcount,
   createInitialState,
   cyclePriority,
   developHeadquarters,
@@ -33,9 +35,12 @@ import {
   shiftMasterScheduleTask,
   sendPressureInstruction,
   sendContractorEscalation,
+  skipOptionalTask,
   submitTaskForAcceptance,
   takeOrganizationLoan,
   tickState,
+  toggleInHouseDesign,
+  tryMagicResolve,
   unhireContractor,
   unhireTeamMember,
   unlockTasks,
@@ -49,13 +54,13 @@ const STORAGE_KEY = 'fitout-mission-v4';
 const ICONS = {
   survey: '⌁', project:'⌑', move: '↔', electric: 'ϟ', prep: '▧', paint: '◩', desks: '▤', clean: '✦', 'executive-docs':'▥', inspect: '✓',
 };
-const SKILL_LABELS = { management: 'Прораб', general:'Универсальная хозбригада', design:'Проектирование', documentation:'Исполнительная', support:'Команда', moving: 'Перестановка', paint: 'Отделка', electric: 'Электрика', furniture: 'Мебель', cleaning: 'Клининг' };
-const STATUS_LABELS = { locked: 'Ждёт зависимости', ready: 'Можно начинать', active: 'В работе', awaiting:'Готово к предъявлению', done: 'Принято', blocked: 'Нет бюджета' };
+const SKILL_LABELS = { management: 'Прораб', general:'Универсальная хозбригада', design:'Проектирование', documentation:'Исполнительная', support:'Команда', demolition:'Демонтаж',construction:'Общестрой',engineering:'Инженерные сети',moving: 'Перестановка', paint: 'Отделка', electric: 'Электрика', furniture: 'Мебель', cleaning: 'Клининг' };
+const STATUS_LABELS = { locked: 'Ждёт зависимости', ready: 'Можно начинать', active: 'В работе', awaiting:'Готово к предъявлению', done: 'Принято', skipped:'Осознанно пропущено', blocked: 'Нет бюджета' };
 const PERSON_NAMES = {
-  foreman:['Илья Петрович'],moving:['Рустам','Вадим'],paint:['Саша','Николай'],electric:['Денис','Тимур'],furniture:['Женя','Павел'],cleaning:['Лена','Марина'],
+  foreman:['Илья Петрович'],moving:['Рустам','Вадим'],demolition:['Марат','Артур'],construction:['Пётр','Ринат'],engineering:['Ильдар','Максим'],paint:['Саша','Николай'],electric:['Денис','Тимур'],furniture:['Женя','Павел'],cleaning:['Лена','Марина'],
   architect:['Мария Корнилова'],client:['Анна Крылова'],police:['Капитан Орлов','Сержант Лебедев'],inspector:['Инспектор Семёнов'],medic:['Фельдшер Вера'],boss:['Виктор Аркадьевич'],delivery:['Водитель Гена'],worker:['Алексей','Марат','Сергей'],
 };
-const PERSON_JOBS = {foreman:'Прораб',moving:'Рабочий · переезд',paint:'Маляр',electric:'Электрик',furniture:'Сборщик мебели',cleaning:'Клининг',architect:'Архитектор',client:'Представитель заказчика',police:'Сотрудник службы',inspector:'Инспектор',medic:'Медик',boss:'Ваше начальство',delivery:'Водитель доставки',worker:'Рабочий'};
+const PERSON_JOBS = {foreman:'Прораб',moving:'Рабочий · переезд',demolition:'Демонтажник',construction:'Монтажник общестроя',engineering:'Монтажник инженерных сетей',paint:'Маляр',electric:'Электрик',furniture:'Сборщик мебели',cleaning:'Клининг',architect:'Архитектор',client:'Представитель заказчика',police:'Сотрудник службы',inspector:'Инспектор',medic:'Медик',boss:'Ваше начальство',delivery:'Водитель доставки',worker:'Рабочий'};
 const PERSON_THOUGHTS = {
   foreman:['«Главное — чтобы никто не спросил про вчерашний график»','«Если записать проблему в протокол, она становится задачей»','«Рулетка опять у архитектора»'],
   architect:['«На рендере кран точно был»','«Инженеры сейчас снова скажут слово “невозможно”»','«Этот серый был теплее на мудборде»'],
@@ -172,6 +177,9 @@ let renderedLogLength = state.log.length;
 let eventShowing = null;
 let resultShown = false;
 let selectedPerson = null;
+let playerMoveTarget = null;
+let playerMoveZoneTaskId = null;
+let playerMoveMarker = null;
 let communicationWasPaused = true;
 let selectedEmailTemplate = 'client';
 let eveningScheduleSnapshot=null;
@@ -179,6 +187,8 @@ let eveningScheduleDay=-1;
 let eveningEditing=false;
 let selectedScheduleRoute=null;
 let lastCharacterFrame=performance.now();
+let lastHqCharacterFrame=performance.now();
+let sceneAnimationTime=0;
 let audioEnabled=true;
 let audioContext=null;
 let cameraKick=0;
@@ -241,7 +251,7 @@ function installPlayerState(rawState) {
   orders=Array.isArray(state.orderOptions)&&state.orderOptions.length?state.orderOptions.map(decorateOrder):createOrderMarket();
   state.orderOptions=orders;selectedOrderId=state.selectedOrder?.id??orders[0]?.id;
   visualProfile=createVisualProfile(state.visualSeed??1,state.selectedOrder);unlockTasks(state);clearCrewMeshes();rebuildTaskMarkers();
-  renderedLogLength=state.log.length;resultShown=false;selectedPerson=null;
+  renderedLogLength=state.log.length;resultShown=false;selectedPerson=null;playerMoveTarget=null;playerMoveZoneTaskId=null;if(playerMoveMarker)playerMoveMarker.visible=false;
 }
 
 function renderMainMenu() {
@@ -250,7 +260,7 @@ function renderMainMenu() {
   const continueButton=$('#continueGameButton');
   continueButton.disabled=!saved;
   if(saved?.selectedOrder) {
-    const completed=saved.tasks?.filter(task=>task.status==='done').length??0;
+    const completed=saved.tasks?.filter(task=>['done','skipped'].includes(task.status)).length??0;
     $('#continueSummary').textContent=`${saved.selectedOrder.title} · ${saved.selectedOrder.location}. Закрыто ${completed} из ${saved.tasks.length} работ, на счёте ${money(saved.budget)}.`;
   } else $('#continueSummary').textContent='Сохранённого объекта пока нет. Это самый спокойный момент вашей карьеры.';
   $('#organizationName').textContent=organization.name;
@@ -264,6 +274,8 @@ function renderMainMenu() {
   $('#hqLevel').textContent=String(state.hq?.level??0);$('#hqTitle').textContent=state.hq?.title??'Стол у принтера';$('#hqStatus').textContent=state.hq?.lastFailure??'Клиентам строим лучше, чем себе.';$('#hqCost').textContent=`${hqCost}К`;
   $('#hqSceneLevel').textContent=String(state.hq?.level??0);$('#hqSceneTitle').textContent=state.hq?.title??'Стол у принтера';$('#hqSceneStatus').textContent=state.hq?.lastFailure??'Клиентам строим лучше, чем себе.';hqPreviewKey='';
   $('#developHqButton').disabled=organization.cash<hqCost;
+  const designButton=$('#designOfficeButton');const designStatus=$('#designOfficeStatus');const designActive=Boolean(organization.inHouseDesign);const projectActive=Boolean(state.selectedOrder)&&state.started&&!state.completed;
+  designButton.childNodes[0].textContent=designActive?'Распустить проектный отдел · ':'Проектный отдел · ';designStatus.textContent=designActive?'12К/день':(state.hq?.level??0)<2?'нужен штаб 2':'240К + 12К/день';designButton.disabled=projectActive||(!designActive&&((state.hq?.level??0)<2||organization.cash<240));
   const avatar=state.playerAvatar??={color:'#ddff55',outfit:'vest',helmet:'classic'};
   document.querySelectorAll('[data-avatar-color]').forEach(button=>button.classList.toggle('active',button.dataset.avatarColor===avatar.color));
   document.querySelectorAll('[data-avatar-outfit]').forEach(button=>button.classList.toggle('active',button.dataset.avatarOutfit===avatar.outfit));
@@ -358,6 +370,7 @@ function renderOrders() {
   $('#orderDetails').innerHTML=`<h2>${selected.title}</h2><span class="order-location">${selected.location} · ${selected.area.toLocaleString('ru-RU')} м²</span>
     <div class="order-badges">${selected.tutorial?'<span>ОБУЧЕНИЕ</span>':''}${selected.campaign?`<span>ГЛАВА ${selected.chapter}</span>`:''}<span>УРОВЕНЬ ${selected.requiredLevel}</span><span class="${selected.clientType==='state'?'state':''}">${selected.clientType==='state'?'государство':'коммерция'}</span><span>${selected.projectTypeLabel}</span><span>класс ${selected.finishClass}</span><span>сложность ${'◆'.repeat(selected.complexity)}</span></div>
     <div class="order-metrics"><div><small>СТАРТОВЫЙ БЮДЖЕТ</small><strong>${money(selected.budget)}</strong></div><div><small>СРОК</small><strong>${selected.deadlineHours} ч</strong></div><div><small>КАЧЕСТВО</small><strong>≥ ${selected.qualityTarget}</strong></div><div><small>ЗАКУПКА</small><strong>${selected.procurement}</strong></div></div>
+    <div class="order-client"><strong>Состав работ · ${selected.tasks.length} операций</strong><small>${selected.tasks.slice(0,8).map(task=>task.short).join(' · ')}${selected.tasks.length>8?` · ещё ${selected.tasks.length-8}`:''}</small></div>
     <div class="order-client"><strong>${selected.clientName}</strong><small>${selected.clientPerson} · ${selected.clientRole}<br>${selected.clientType==='state'?'Решение считается принятым, когда его приняли все отсутствующие.':'Хочет быстро, качественно и чтобы резерв не использовался.'}</small></div>
     <ul class="order-risks">${(selected.requiredLevel??1)>organization.playerLevel?`<li>Нужен уровень ${selected.requiredLevel}. Сейчас: ${organization.playerLevel}.</li>`:''}${(selected.requiresProjects??0)>organization.projectsCompleted?`<li>Нужно закрыть проектов: ${selected.requiresProjects}. Сейчас: ${organization.projectsCompleted}.</li>`:''}${selected.riskTags.map(risk=>`<li>${risk}</li>`).join('')}</ul>`;
   $('#acceptOrder').disabled=locked(selected);$('#acceptOrder').innerHTML=locked(selected)?'Недостаточно опыта организации':'Вести переговоры <span>→</span>';
@@ -391,7 +404,7 @@ function renderPreparation() {
   $('#prepCombinedFunds').textContent=money(state.budget+organization.cash);
   $('#mapGrid').innerHTML=state.contractors.filter(contractor=>contractor.contractClass==='standard').map(contractor=>`<span class="map-node" style="--node:${contractor.color}">${contractor.initials}<small>${contractor.company}</small></span>`).join('');
   $('#teamPicker').innerHTML=state.team.map(member=>`<article class="prep-card"><span class="contractor-avatar" style="--crew-color:${member.color}">${member.initials}</span><span><strong>${member.name} · ур. ${member.level??1}</strong><small>${member.role} · ${member.effect}</small></span><button class="hire-button ${member.hired?'revoke':''}" ${member.hired?`data-team-unhire="${member.id}"`:`data-team-hire="${member.id}"`}>${member.hired?'ОТОЗВАТЬ':`${member.price}К`}</button></article>`).join('');
-  $('#mapContractors').innerHTML=state.contractors.map(contractor=>`<article class="prep-card"><span class="contractor-avatar" style="--crew-color:${contractor.color}">${contractor.initials}</span><span><strong>${contractor.company} · ур. ${contractor.level??1}</strong><small>${contractor.classLabel} · ${contractor.name} · темп ${Math.round(contractor.speed*100)}% · качество ${Math.round(contractor.quality*100)}%</small></span><button class="hire-button ${contractor.hired?'revoke':''}" ${contractor.hired?`data-map-unhire="${contractor.id}"`:`data-map-hire="${contractor.id}"`}>${contractor.hired?'ОТОЗВАТЬ':`${contractor.price}К`}</button></article>`).join('');
+  $('#mapContractors').innerHTML=state.contractors.map(contractor=>`<article class="prep-card"><span class="contractor-avatar" style="--crew-color:${contractor.color}">${contractor.initials}</span><span><strong>${contractor.company} · ур. ${contractor.level??1} · ${contractor.manpower} чел.</strong><small>${contractor.classLabel} · ${contractor.name} · темп ${Math.round(contractor.speed*100)}% · качество ${Math.round(contractor.quality*100)}%</small></span><button class="hire-button ${contractor.hired?'revoke':''}" ${contractor.hired?`data-map-unhire="${contractor.id}"`:`data-map-hire="${contractor.id}"`}>${contractor.hired?'ОТОЗВАТЬ':`${contractor.price}К`}</button></article>`).join('');
   $('#confirmPreparationButton').textContent=state.preparationConfirmed?'Состав подтверждён ✓':'Подтвердить выбранный состав';$('#confirmPreparationButton').disabled=Boolean(state.preparationConfirmed);$('#enterSite').disabled=!state.preparationConfirmed;$('#prepConfirmStatus').textContent=state.preparationConfirmed?'Выход на объект разблокирован. Любое изменение снова откроет черновик.':'Состав можно менять и отзывать без штрафа.';
 }
 
@@ -406,8 +419,8 @@ function renderDayPlan() {
 }
 
 function scheduleStage(task) {
-  if(['survey','project'].includes(task.id))return ['ПОДГОТОВКА / ПРОЕКТ','design'];
-  if(['clean','executive-docs','inspect'].includes(task.id))return ['ПУСК / СДАЧА','handover'];
+  if(task.category==='design'||['survey','project'].includes(task.id))return ['ПОДГОТОВКА / ПРОЕКТ','design'];
+  if(task.category==='handover'||['clean','executive-docs','inspect'].includes(task.id))return ['ПУСК / СДАЧА','handover'];
   return ['СТРОИТЕЛЬСТВО','build'];
 }
 
@@ -502,7 +515,7 @@ function openReport() {
     baseRows.push(`<tr><td>${index+1}</td><td>1.${Math.floor(index/6)+1}.${index%6+1}</td><td>${task.title}${index>=state.tasks.length?' · уточняющая строка':''}</td><td>${task.duration.toFixed(1)}</td><td>${actual.toFixed(1)}</td><td>${variance>0?'+':''}${variance.toFixed(1)}</td><td>${STATUS_LABELS[task.status]??task.status}</td><td>${crew?.name??'Не назначен'}</td><td>${index%4===0?'Ожидается уточнение после уточнения':index%4===1?'Без критических критических замечаний':index%4===2?'В работе согласно текущей версии текущего графика':'Требуется письмо'}</td></tr>`);
   }
   $('#reportRows').innerHTML=baseRows.join('');
-  $('#reportSummary').textContent=`36 строк · ${state.tasks.filter(t=>t.status==='done').length} закрыто · файл весит больше, чем управленческое решение`;
+  $('#reportSummary').textContent=`36 строк · ${state.tasks.filter(t=>['done','skipped'].includes(t.status)).length} закрыто · файл весит больше, чем управленческое решение`;
   renderEveningScheduleDecision();
   refs.report.classList.add('visible');
 }
@@ -524,11 +537,13 @@ function assignmentControls(crew) {
 }
 
 function renderTeamBook() {
-  const teamRows=state.team.map(member=>{const crew=state.crews.find(item=>item.id===`team-${member.id}`)||(member.id==='pm'?state.crews.find(item=>item.id==='foreman'):null);const away=crew&&(crew.unavailableUntil??0)>state.elapsed;return `<article class="book-person contractor-book-row"><i style="--person:${member.color}">${member.initials}</i><span><strong>${member.name} · ур. ${member.level??1}</strong><small>${member.role} · ${member.effect}</small></span><div><b class="${!member.hired||away?'away':''}">${!member.hired?'НЕ НАНЯТ':away?'НЕТ НА ОБЪЕКТЕ':crew?.taskId?'В РАБОТЕ':'НА ОБХОДЕ'}</b>${member.hired?assignmentControls(crew):''}</div></article>`;});
+  const teamRows=state.team.map(member=>{const crew=state.crews.find(item=>item.id===`team-${member.id}`);const away=crew&&(crew.unavailableUntil??0)>state.elapsed;return `<article class="book-person contractor-book-row"><i style="--person:${member.color}">${member.initials}</i><span><strong>${member.name} · ур. ${member.level??1}</strong><small>${member.role} · ${member.effect}</small></span><div><b class="${!member.hired||away?'away':''}">${!member.hired?'НЕ НАНЯТ':away?'НЕТ НА ОБЪЕКТЕ':crew?.taskId?'В РАБОТЕ':'НА ОБХОДЕ'}</b>${member.hired?assignmentControls(crew):''}</div></article>`;});
+  const permanentDesign=state.crews.find(crew=>crew.id==='inhouse-design');if(permanentDesign)teamRows.unshift(`<article class="book-person contractor-book-row"><i style="--person:#a58ae1">ПО</i><span><strong>Проектный отдел организации · 3 чел.</strong><small>Постоянный штат · 12К операционных расходов в день</small></span><div><b>${permanentDesign.taskId?'ВЫПУСКАЕТ ПРОЕКТ':'В ШТАБЕ'}</b>${assignmentControls(permanentDesign)}</div></article>`);
   const hired=state.contractors.filter(item=>item.hired);
-  const contractorRows=hired.map(item=>{const crew=state.crews.find(crew=>crew.id===`crew-${item.id}`);const waiting=crew&&(crew.unavailableUntil??0)>state.elapsed;return `<article class="book-person contractor-book-row"><i style="--person:${item.color}">${item.initials}</i><span><strong>${item.company} · ур. ${item.level??1}</strong><small>${item.classLabel} · ${item.name} · ${item.quirk}</small></span><div><b class="${waiting?'away':''}">${waiting?'ВЫХОД ЗАВТРА':crew?.taskId?'РАБОТАЕТ':'НА ОБЪЕКТЕ'}</b>${assignmentControls(crew)}<button data-dismiss-contractor="${item.id}" ${state.needsReport?'':'disabled'}>Снять вечером</button></div></article>`;}).join('');
-  const replacements=state.contractors.filter(item=>!item.hired).map(item=>`<article class="book-person contractor-book-row"><i style="--person:${item.color}">${item.initials}</i><span><strong>${item.company} · ${item.classLabel}</strong><small>${item.quirk}<br>${item.price}К · темп ${Math.round(item.speed*100)}% · качество ${Math.round(item.quality*100)}%</small></span><button data-replace-contractor="${item.id}">Нанять · выход завтра</button></article>`).join('');
-  $('#teamBook').innerHTML=`<div class="subheading"><span>ВАША КОМАНДА · ОПЫТ ОСТАЁТСЯ</span><strong>${state.team.filter(item=>item.hired).length}</strong></div>${teamRows.join('')}<div class="subheading" style="margin-top:16px"><span>ПОДРЯДЧИКИ · СНЯТИЕ ТОЛЬКО ВЕЧЕРОМ</span><strong>${hired.length}</strong></div>${contractorRows||'<p class="empty-team">На объекте остался только оптимизм.</p>'}${replacements?`<div class="subheading" style="margin-top:16px"><span>ДОНАБОР ЛЮБОГО ПРОФИЛЯ · 1 ДЕНЬ</span><strong>${state.contractors.length} В ПУЛЕ</strong></div><div class="contractor-market-grid">${replacements}</div>`:''}`;
+  const contractorRows=hired.map(item=>{const crew=state.crews.find(crew=>crew.id===`crew-${item.id}`);const waiting=crew&&(crew.unavailableUntil??0)>state.elapsed;const actual=crewHeadcount(state,crew);const pending=crew?.pendingManpower??0;return `<article class="book-person contractor-book-row"><i style="--person:${item.color}">${item.initials}</i><span><strong>${item.company} · ур. ${item.level??1} · ${actual} чел.${pending?` +${pending} завтра`:''}</strong><small>${item.classLabel} · ${item.name} · ${item.quirk}</small></span><div><b class="${waiting?'away':''}">${waiting?'ВЫХОД ЗАВТРА':crew?.visualBehavior==='smoking'?'КУРЯТ':crew?.taskId?'РАБОТАЮТ':'НА ОБЪЕКТЕ'}</b><span class="manpower-controls"><button type="button" data-contract-manpower="${item.id}" data-manpower-delta="-1" ${item.manpower<=2?'disabled':''}>−1 человек</button><button type="button" data-contract-manpower="${item.id}" data-manpower-delta="1" ${item.manpower>=12?'disabled':''}>Усилить +1</button></span>${assignmentControls(crew)}<button data-dismiss-contractor="${item.id}" ${state.needsReport?'':'disabled'}>Снять вечером</button></div></article>`;}).join('');
+  const replacements=state.contractors.filter(item=>!item.hired).map(item=>`<article class="book-person contractor-book-row"><i style="--person:${item.color}">${item.initials}</i><span><strong>${item.company} · ${item.classLabel} · ${item.manpower} чел.</strong><small>${item.quirk}<br>${item.price}К · темп ${Math.round(item.speed*100)}% · качество ${Math.round(item.quality*100)}%</small></span><button data-replace-contractor="${item.id}">Нанять · выход завтра</button></article>`).join('');
+  const hiredPeople=hired.reduce((sum,item)=>sum+crewHeadcount(state,state.crews.find(crew=>crew.id===`crew-${item.id}`)),0);
+  const ownPeople=state.team.filter(item=>item.hired).length+(permanentDesign?crewHeadcount(state,permanentDesign):0);$('#teamBook').innerHTML=`<div class="subheading"><span>ВАША КОМАНДА · ОПЫТ ОСТАЁТСЯ</span><strong>${ownPeople} ЧЕЛ.</strong></div>${teamRows.join('')}<div class="subheading" style="margin-top:16px"><span>ПОДРЯДЧИКИ · СНЯТИЕ ТОЛЬКО ВЕЧЕРОМ</span><strong>${hiredPeople} ЧЕЛ. · ${hired.length} БРИГ.</strong></div>${contractorRows||'<p class="empty-team">На объекте остался только оптимизм.</p>'}${replacements?`<div class="subheading" style="margin-top:16px"><span>ДОНАБОР ЛЮБОГО ПРОФИЛЯ · 1 ДЕНЬ</span><strong>${state.contractors.length} В ПУЛЕ</strong></div><div class="contractor-market-grid">${replacements}</div>`:''}`;
 }
 
 function renderFinanceBook() {
@@ -562,13 +577,14 @@ function taskProblem(task) {
     const waiting=task.deps.map(id=>state.tasks.find(item=>item.id===id)?.short).filter(Boolean);
     return waiting.length?`Ждёт: ${waiting.join(', ')}`:'Ждёт предыдущие работы';
   }
-  if(task.status==='ready'&&state.started&&!state.crews.some(item=>item.skill===task.skill))return `Нет исполнителя: ${SKILL_LABELS[task.skill]}`;
+  if(task.status==='ready'&&state.started&&!state.crews.some(item=>item.skill===task.skill||item.skill==='general'))return `Нет исполнителя: ${SKILL_LABELS[task.skill]}`;
   if(task.status==='ready'&&state.started&&!task.enabledToday)return 'Не включено в план текущего дня';
   return '';
 }
 
 function taskStatus(task) {
   if(task.status==='done')return ['ГОТОВО','done'];
+  if(task.status==='skipped')return ['ПРОПУЩЕНО','waiting'];
   if(task.status==='awaiting')return ['ПРЕДЪЯВИТЬ','acceptance'];
   if(task.status==='active')return ['ИДЁТ','active'];
   if(task.status==='blocked')return ['ПРОБЛЕМА','problem'];
@@ -583,11 +599,13 @@ function renderTasks() {
     const [statusLabel,statusClass]=taskStatus(task);
     const issue=taskProblem(task);
     return `<article class="task-card ${task.status} ${issue?'has-problem':''} ${state.selectedTaskId === task.id ? 'selected' : ''}" data-task="${task.id}" style="--task-color:${task.color};--progress:${percent}%">
-      <span class="task-status">${task.status === 'done' ? '✓' : (ICONS[task.reworkOf?'clean':task.id]??'◆')}</span>
+      <span class="task-status">${task.status === 'done' ? '✓' : task.status==='skipped'?'×':(ICONS[task.reworkOf?'clean':task.id]??'◆')}</span>
       <span class="task-copy">
         <span class="task-title-row"><strong>${task.title}</strong><b class="task-state ${statusClass}">${statusLabel}</b></span>
         <span class="task-progress-row"><i><em style="width:${percent}%"></em></i><b>${percent}%</b><small>${SKILL_LABELS[task.skill]} · ${task.duration} ч</small></span>
         ${issue?`<span class="task-problem">! ${issue}</span>`:''}
+        ${task.status==='ready'&&!task.enabledToday?`<button class="task-start-button" data-start-task="${task.id}">Включить сегодня · начать</button>`:''}
+        ${task.optional&&['ready','locked','blocked'].includes(task.status)?`<button class="task-skip-button" data-skip-task="${task.id}">Сэкономить · пропустить с риском</button>`:''}
         ${task.status==='awaiting'?`<button class="acceptance-button" data-submit-task="${task.id}">Предъявить работу · попытка ${(task.acceptanceAttempts??0)+1}</button>`:''}
       </span>
       <button class="priority-button" data-priority="${task.id}" title="Изменить приоритет" aria-label="Приоритет ${task.priority}">
@@ -600,7 +618,7 @@ function renderTasks() {
 function renderContractors() {
   refs.contractorList.innerHTML = state.contractors.map((contractor) => `<article class="contractor-card">
     <span class="contractor-avatar" style="--crew-color:${contractor.color}">${contractor.initials}</span>
-    <span class="contractor-copy"><strong>${contractor.company} · ур. ${contractor.level??1}</strong><small>${contractor.classLabel} · ${contractor.name} · ${contractor.quirk}</small><span class="contractor-meta"><b>★ ${contractor.rating}</b><b>↗ ${Math.round(contractor.speed * 100)}% темп</b><b>◆ ${Math.round(contractor.quality*100)}% качество</b></span></span>
+    <span class="contractor-copy"><strong>${contractor.company} · ур. ${contractor.level??1}</strong><small>${contractor.classLabel} · ${contractor.name} · ${contractor.quirk}</small><span class="contractor-meta"><b>♟ ${contractor.manpower} чел.</b><b>★ ${contractor.rating}</b><b>↗ ${Math.round(contractor.speed * 100)}% темп</b><b>◆ ${Math.round(contractor.quality*100)}% качество</b></span></span>
     <button class="hire-button" data-hire="${contractor.id}" ${contractor.hired||state.started ? 'disabled' : ''}>${contractor.hired ? 'НАНЯТЫ' : state.started?'КАРТА':`${contractor.price}К`}</button>
   </article>`).join('');
 }
@@ -608,10 +626,11 @@ function renderContractors() {
 function renderCrews() {
   refs.crewList.innerHTML = state.crews.map((crew) => {
     const task = state.tasks.find((item) => item.id === crew.taskId);
-    return `<article class="crew-card"><span class="crew-avatar" style="--crew-color:${crew.color}">${crew.initials}</span><span><strong>${crew.name}</strong><small>${task ? task.short : crew.role}</small></span><span class="crew-state ${task ? '' : 'idle'}">${task ? 'РАБОТАЕТ' : 'ЖДЁТ'}</span></article>`;
+    const behavior=crew.visualBehavior;const stateLabel=behavior==='cleaning'?'УБИРАЕТ':behavior==='to-clean'?'К МУСОРУ':behavior==='smoking'?'КУРИТ':behavior==='to-smoke'?'НА ПЕРЕКУР':behavior==='to-work'?'ИДЁТ':task?'РАБОТАЕТ':'ЖДЁТ';
+    return `<article class="crew-card"><span class="crew-avatar" style="--crew-color:${crew.color}">${crew.initials}</span><span><strong>${crew.name} · ${crewHeadcount(state,crew)} чел.</strong><small>${task ? task.short : crew.role}</small></span><span class="crew-state ${task&&!behavior?.includes('smoke')?'':'idle'}">${stateLabel}</span></article>`;
   }).join('');
-  const present=state.crews.filter(crew=>(crew.unavailableUntil??0)<=state.elapsed).length;
-  refs.crewCount.textContent = `${present} на объекте →`;
+  const presentCrews=state.crews.filter(crew=>(crew.unavailableUntil??0)<=state.elapsed);const presentPeople=presentCrews.reduce((sum,crew)=>sum+crewHeadcount(state,crew),0);
+  refs.crewCount.textContent = `${presentPeople} чел. · ${presentCrews.length} групп →`;
 }
 
 function renderSelection() {
@@ -623,14 +642,14 @@ function renderSelection() {
     const thought=thoughts[(Math.floor(state.elapsed/6)+(data.variant??0))%thoughts.length];
     const mood=data.isSmoker?'Подозрительно расслаблен':data.eventActor?'Официально сосредоточен':task?'Занят и слегка раздражён':data.role==='client'?(state.trust>75?'Осторожно доволен':'Считает чужие деньги'):data.role==='architect'?'Защищает концепцию':'Ждёт указаний';
     const roleActions={architect:'Сверяет чертёж с тем, что получилось',client:'Осматривает объект и ищет сюрпризы',police:'Проверяет документы и этаж',inspector:'Ищет акт, журнал и удлинитель',boss:'Решает, кого забрать на другой объект',medic:'Проверяет состояние человека',delivery:'Ищет место разгрузки'};
-    const action=data.isSmoker?'Обсуждает проблему, не двигаясь к ней':task?.title??roleActions[data.role]??'Ожидает доступную работу';
+    const action=data.isSmoker?'Обсуждает проблему, не двигаясь к ней':crew?.visualBehavior==='cleaning'?'Убирает накопившийся строительный мусор':crew?.visualBehavior==='to-clean'?'Идёт к следующей куче мусора':crew?.visualBehavior==='smoking'?'Курит. Квалификация пока позволяет только это':crew?.visualBehavior==='to-smoke'?'Целенаправленно идёт в курилку':crew?.visualBehavior==='to-work'?'Идёт на назначенный фронт':crew?.visualBehavior==='idle'?'Бездельничает в отведённом месте':task?.title??roleActions[data.role]??'Ожидает доступную работу';
     refs.selection.hidden=false;
     refs.selection.style.setProperty('--task-color',data.role==='client'?'#d6a579':data.role==='architect'?'#d87561':'#ddff55');
     refs.selection.innerHTML=`<div class="selection-top"><div><span class="eyebrow">${data.role==='player'?'ВЫ НА ОБЪЕКТЕ':'ПЕРСОНАЖ'}</span><h3>${data.displayName}</h3></div><button class="selection-close" data-close-selection type="button" aria-label="Закрыть">×</button></div>
       <p><b>${data.job}${data.company?` · ${data.company}`:''}</b></p>
       <p><span class="person-label">НАСТРОЕНИЕ</span>${mood}</p>
       <p><span class="person-label">ДУМАЕТ</span>${thought}</p>
-      <p><span class="person-label">ДЕЛАЕТ</span>${action}</p>${data.role==='player'?`<p><span class="person-label">ЭФФЕКТ</span>В выбранной зоне темп работ +18%</p>`:''}`;
+      <p><span class="person-label">ДЕЛАЕТ</span>${action}</p>${data.role==='player'?`<p><span class="person-label">УПРАВЛЕНИЕ</span>Кликните по полу — аватар пойдёт в указанную точку</p><p><span class="person-label">ЭФФЕКТ</span>В выбранной зоне темп работ +18%</p>`:''}`;
     return;
   }
   const task = state.tasks.find((item) => item.id === state.selectedTaskId);
@@ -642,12 +661,12 @@ function renderSelection() {
   refs.selection.hidden = false;
   refs.selection.style.setProperty('--task-color', task.color);
   refs.selection.innerHTML = `<div class="selection-top"><div><span class="eyebrow">${SKILL_LABELS[task.skill].toUpperCase()}</span><h3>${task.title}</h3></div><button class="selection-close" data-close-selection type="button" aria-label="Закрыть">×</button></div>
-    <p>${crew ? `${crew.name} уже на месте. Осталось примерно ${Math.max(1, Math.ceil(task.duration * (1 - task.progress) / crew.speed))} ч.` : task.status === 'locked' ? 'Сначала завершите зависимые работы. Бетон не читает диаграмму Ганта, но всё равно требует последовательности.' : task.status === 'done' ? 'Работа закрыта. Фото приложены, замечания предусмотрительно не найдены.' : 'Свободная подходящая бригада возьмёт эту работу автоматически.'}</p>
+    <p>${crew ? `${crew.name} уже на месте. Осталось примерно ${Math.max(1, Math.ceil(task.duration * (1 - task.progress) / crew.speed))} ч.` : task.status === 'locked' ? 'Сначала завершите зависимые работы. Бетон не читает диаграмму Ганта, но всё равно требует последовательности.' : task.status === 'done' ? 'Работа закрыта. Фото приложены, замечания предусмотрительно не найдены.' : task.status==='skipped'?'Вы осознанно не стали это делать. Экономия уже случилась, последствия ещё выбирают время.':'Свободная подходящая бригада возьмёт эту работу автоматически.'}</p>
     <div class="selection-progress"><i style="width:${Math.round(task.progress * 100)}%"></i></div><button class="player-zone-button" data-player-zone="${task.id}" type="button">${state.playerZoneTaskId===task.id?'ВЫ УЖЕ ЗДЕСЬ · ТЕМП +18%':'ПРИЙТИ В ЭТУ ЗОНУ'}</button>`;
 }
 
 function renderHud() {
-  const done = state.tasks.filter((task) => task.status === 'done').length;
+  const done = state.tasks.filter((task) => ['done','skipped'].includes(task.status)).length;
   const deadline=state.contract?.deadlineHours??DEADLINE_HOURS;
   const initialBudget=state.contract?.budget??INITIAL_BUDGET;
   const remaining = deadline - state.elapsed;
@@ -669,7 +688,10 @@ function renderHud() {
   refs.risk.className = `risk ${risk.level}`;
   refs.risk.innerHTML = `<span>РИСК</span><strong>${risk.text}</strong>`;
   const active = state.tasks.filter((task) => task.status === 'active').length;
-  refs.siteStatus.textContent = state.paused ? 'Пауза на объекте' : active ? `${active} работ в процессе` : 'Прораб изучает горизонт';
+  const congestion=state.siteCongestion;const congestionText=congestion&&congestion.penalty<.995?` · теснота −${Math.round((1-congestion.penalty)*100)}%`:'';const dirtText=(state.siteDirt??0)>4?` · мусор ${Math.round(state.siteDirt)}%`:'';
+  refs.siteStatus.textContent = state.paused ? `Пауза на объекте${congestionText}${dirtText}` : active ? `${active} работ в процессе${congestionText}${dirtText}` : `Люди ждут доступный фронт${congestionText}${dirtText}`;
+  const magicButton=$('#magicResolveButton');const magicStatus=$('#magicResolveStatus');
+  if(magicButton&&magicStatus){const lastAt=Number.isFinite(state.magicResolve?.lastAt)?state.magicResolve.lastAt:-1e9;const remaining=Math.max(0,48-(state.elapsed-lastAt));magicButton.disabled=!state.started||remaining>0;magicStatus.textContent=!state.started?'ПОСЛЕ СТАРТА':remaining>0?`ЧЕРЕЗ ${Math.ceil(remaining)} Ч`:'ГОТОВО';}
   $('#pauseButton').innerHTML = state.paused
     ? '<svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>'
     : '<svg viewBox="0 0 24 24"><path d="M7 5v14M17 5v14"/></svg>';
@@ -803,6 +825,70 @@ const gz = (y) => (y - 3.4) * unit;
 const footprintScale=()=>Math.max(.68,Math.min(1.65,Math.sqrt((state.selectedOrder?.area??600)/600)));
 const siteX=(x)=>gx(x)*footprintScale();
 const siteZ=(y)=>gz(y)*footprintScale();
+const CREW_STAGING_POINTS={
+  moving:[6.7,5.35],demolition:[2.4,4.7],construction:[3.5,4.8],engineering:[6.2,3.6],paint:[1.35,4.75],electric:[6.7,1.25],furniture:[4.85,4.75],cleaning:[7.15,4.05],
+  design:[2.05,1.55],documentation:[5.65,1.35],general:[3.25,5.2],support:[7.2,5.2],management:[4.25,5.55],
+};
+
+function crewStagingPoint(crew,crewIndex=0) {
+  if(crew.id==='foreman'||crew.taskId)return new THREE.Vector3(siteX(crew.x),.03,siteZ(crew.y));
+  const key=crew.supportRole?'support':crew.skill;
+  const [x,y]=CREW_STAGING_POINTS[key]??CREW_STAGING_POINTS.general;
+  const hash=[...crew.id].reduce((sum,char)=>sum+char.charCodeAt(0),crewIndex*17);
+  const angle=(hash%12)/12*Math.PI*2;
+  const radius=.18+(hash%3)*.12;
+  return new THREE.Vector3(siteX(x)+Math.cos(angle)*radius,.03,siteZ(y)+Math.sin(angle)*radius);
+}
+
+function crewDiscipline(crew){
+  if(crew.id==='foreman')return 1;
+  return THREE.MathUtils.clamp(.3+((crew.quality??.78)-.65)*1.2+((crew.level??1)-1)*.11+(crew.id.startsWith('team-') ? .08 : 0),.32,.98);
+}
+
+function crewWorkPoint(crew,crewIndex=0){
+  const task=state.tasks.find(item=>item.id===crew.taskId);if(!task)return crewStagingPoint(crew,crewIndex);
+  const hash=[...crew.id].reduce((sum,char)=>sum+char.charCodeAt(0),crewIndex*13);const angle=(hash%16)/16*Math.PI*2;const radius=.26+(hash%4)*.06;
+  return new THREE.Vector3(siteX(task.x)+Math.cos(angle)*radius,.03,siteZ(task.y)+Math.sin(angle)*radius);
+}
+
+function crewSmokePoint(crew,crewIndex=0){
+  const shift=(footprintScale()-1)*5.2;const slot=crewIndex%6;
+  return new THREE.Vector3(6.02+shift+(slot%3)*.48,.03,-2.62+Math.floor(slot/3)*.42);
+}
+
+function crewCleaningPoint(crew,crewIndex=0){
+  const hash=[...crew.id].reduce((sum,char)=>sum+char.charCodeAt(0),crewIndex*19);const slot=hash%6;
+  return new THREE.Vector3(siteX(2.2+(slot%3)*1.75),.03,siteZ(2.1+Math.floor(slot/3)*2.1));
+}
+
+function crewTakesBreak(crew,t){
+  if(crew.id==='foreman')return false;
+  const discipline=crewDiscipline(crew);const hash=[...crew.id].reduce((sum,char)=>sum+char.charCodeAt(0),0);const cycle=20+discipline*22;const phase=(t+(hash%17)*1.7)%cycle;const duration=(1-discipline)*(crew.taskId?4.2:8.5);
+  return state.smokeBreak||phase<duration;
+}
+
+function routedCrewWaypoint(mesh,finalTarget,routeKey,crew,smoking=false){
+  if(mesh.userData.routeKey!==routeKey){
+    const hash=[...crew.id].reduce((sum,char)=>sum+char.charCodeAt(0),0);const lane=((hash%5)-2)*.11;const points=[];const distance=mesh.position.distanceTo(finalTarget);
+    if(distance>1.25){
+      const entry=new THREE.Vector3(siteX(7.45)+lane,.03,siteZ(5.55));const corridor=new THREE.Vector3(siteX(4.15)+lane,.03,siteZ(4.15));
+      if(smoking){points.push(entry);}else if(mesh.position.z>corridor.z+.55||finalTarget.z>corridor.z+.55){points.push(corridor);}
+    }
+    points.push(finalTarget.clone());mesh.userData.routeKey=routeKey;mesh.userData.routePoints=points;mesh.userData.routeIndex=0;
+  }
+  const points=mesh.userData.routePoints??[finalTarget];let waypoint=points[Math.min(mesh.userData.routeIndex??0,points.length-1)];
+  if(mesh.position.distanceTo(waypoint)<.16&&(mesh.userData.routeIndex??0)<points.length-1){mesh.userData.routeIndex+=1;waypoint=points[mesh.userData.routeIndex];}
+  return waypoint;
+}
+
+function crewSeparation(mesh){
+  const force=new THREE.Vector3();
+  for(const other of crewMeshes.values()){
+    if(other===mesh||!other.visible)continue;const delta=mesh.position.clone().sub(other.position);delta.y=0;const distance=delta.length();
+    if(distance>.03&&distance<.72)force.add(delta.normalize().multiplyScalar((.72-distance)/.72));
+  }
+  return force;
+}
 
 function mat(color, roughness = .72, metalness = .04) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
@@ -829,9 +915,25 @@ const hqRoot=new THREE.Group();hqScene.add(hqRoot);let hqPreviewKey='';let hqPre
 function hqMat(color,roughness=.72,metalness=.04){return new THREE.MeshStandardMaterial({color,roughness,metalness});}
 function hqBox(name,size,pos,material,parent=hqRoot,cast=true){const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.name=name;mesh.position.set(...pos);mesh.castShadow=cast;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
 function hqDesk(x,z,rotation=0){const group=new THREE.Group();group.position.set(x,0,z);group.rotation.y=rotation;hqRoot.add(group);hqBox('hq-desk-top',[1.35,.1,.66],[0,.69,0],hqMat('#98704e'),group);hqBox('hq-desk-leg',[.08,.65,.5],[-.5,.34,0],hqMat('#303b36',.42,.28),group);hqBox('hq-desk-leg',[.08,.65,.5],[.5,.34,0],hqMat('#303b36',.42,.28),group);const screen=hqBox('hq-screen',[.48,.34,.04],[0,.97,.06],new THREE.MeshStandardMaterial({color:'#182b26',emissive:'#6ed6b1',emissiveIntensity:.25,roughness:.28}),group);hqPreviewScreens.push(screen);return group;}
-function hqPerson(x,z,color,index){const avatar=state.playerAvatar??{};const isPlayer=index===0;color=isPlayer?(avatar.color??color):color;const group=new THREE.Group();group.position.set(x,.02,z);const leftLeg=new THREE.Mesh(new THREE.CapsuleGeometry(.065,.3,4,8),hqMat('#303a36'));leftLeg.position.set(-.09,.27,0);group.add(leftLeg);const rightLeg=leftLeg.clone();rightLeg.position.x=.09;group.add(rightLeg);const torso=new THREE.Mesh(new THREE.CapsuleGeometry(.17,.25,5,10),hqMat(color,.58));torso.position.y=.72;group.add(torso);const leftArm=new THREE.Mesh(new THREE.CapsuleGeometry(.045,.28,4,8),hqMat(isPlayer&&avatar.outfit==='suit'?color:'#d7a37c'));leftArm.position.set(-.22,.68,0);leftArm.rotation.z=-.12;group.add(leftArm);const rightArm=leftArm.clone();rightArm.position.x=.22;rightArm.rotation.z=.12;group.add(rightArm);const head=new THREE.Mesh(new THREE.SphereGeometry(.14,14,10),hqMat('#d7a37c'));head.position.y=1.08;group.add(head);const hair=new THREE.Mesh(new THREE.SphereGeometry(.145,12,7,0,Math.PI*2,0,Math.PI/2),hqMat(index%2?'#3c302b':'#6a5548'));hair.position.y=1.145;group.add(hair);let playerAura=null;if(isPlayer){const helmet=new THREE.Mesh(avatar.helmet==='cap'?new THREE.CylinderGeometry(.1,.16,.08,16):new THREE.SphereGeometry(.16,14,7,0,Math.PI*2,0,Math.PI/2),hqMat(avatar.helmet==='visor'?'#202a2b':'#f0f2e9',.35,.1));helmet.position.y=1.19;group.add(helmet);playerAura=new THREE.Mesh(new THREE.RingGeometry(.33,.43,28),new THREE.MeshBasicMaterial({color:'#ddff55',transparent:true,opacity:.9,side:THREE.DoubleSide}));playerAura.rotation.x=-Math.PI/2;playerAura.position.y=.015;group.add(playerAura);}group.scale.setScalar(isPlayer?.9:.8);group.userData={baseX:x,baseZ:z,leftLeg,rightLeg,leftArm,rightArm,index,playerAura};hqRoot.add(group);hqPreviewPeople.push(group);return group;}
+function hqPerson(x,z,color,index){
+  const avatar=state.playerAvatar??{};const isPlayer=index===0;color=isPlayer?(avatar.color??color):color;
+  const group=new THREE.Group();group.position.set(x,.02,z);
+  const leftLeg=new THREE.Mesh(new THREE.CapsuleGeometry(.065,.3,4,8),hqMat('#303a36'));leftLeg.position.set(-.09,.27,0);group.add(leftLeg);
+  const rightLeg=leftLeg.clone();rightLeg.position.x=.09;group.add(rightLeg);
+  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(.17,.25,5,10),hqMat(color,.58));torso.position.y=.72;group.add(torso);
+  const leftArm=new THREE.Mesh(new THREE.CapsuleGeometry(.045,.28,4,8),hqMat(isPlayer&&avatar.outfit==='suit'?color:'#d7a37c'));leftArm.position.set(-.22,.68,0);leftArm.rotation.z=-.12;group.add(leftArm);
+  const rightArm=leftArm.clone();rightArm.position.x=.22;rightArm.rotation.z=.12;group.add(rightArm);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.14,14,10),hqMat('#d7a37c'));head.position.y=1.08;group.add(head);
+  const hair=new THREE.Mesh(new THREE.SphereGeometry(.145,12,7,0,Math.PI*2,0,Math.PI/2),hqMat(index%2?'#3c302b':'#6a5548'));hair.position.y=1.145;group.add(hair);
+  const legacyVisuals=group.children.slice();let playerAura=null;
+  if(isPlayer){playerAura=new THREE.Mesh(new THREE.RingGeometry(.38,.5,28),new THREE.MeshBasicMaterial({color:'#ddff55',transparent:true,opacity:.9,side:THREE.DoubleSide}));playerAura.rotation.x=-Math.PI/2;playerAura.position.y=.015;group.add(playerAura);}
+  group.scale.setScalar(isPlayer?.78:.68);group.userData={baseX:x,baseZ:z,leftLeg,rightLeg,leftArm,rightArm,index,playerAura};hqRoot.add(group);hqPreviewPeople.push(group);
+  const role=isPlayer?'player':index%3===1?'worker':index%3===2?'client':'architect';const profile=createPersonProfile(role,(state.visualSeed??1)+index*19,index);
+  requestRiggedCharacter(group,{role,color,profile,avatar:isPlayer?avatar:null,variant:index},legacyVisuals);
+  return group;
+}
 function hqPlant(x,z){const group=new THREE.Group();group.position.set(x,0,z);hqRoot.add(group);const pot=new THREE.Mesh(new THREE.CylinderGeometry(.2,.16,.34,12),hqMat('#c87552'));pot.position.y=.17;group.add(pot);for(let i=0;i<6;i++){const leaf=new THREE.Mesh(new THREE.SphereGeometry(.17,8,6),hqMat(i%2?'#69a977':'#82bd82'));leaf.scale.set(.5,1.55,.4);leaf.rotation.z=(i-2.5)*.3;leaf.position.set(Math.sin(i)*.12,.58+(i%2)*.1,Math.cos(i)*.12);group.add(leaf);}}
-function rebuildHqPreview(){const hq=state.hq??{level:0,attempts:0};const avatar=state.playerAvatar??{};const key=`${hq.level}:${hq.attempts}:${avatar.color}:${avatar.outfit}:${avatar.helmet}`;if(key===hqPreviewKey)return;hqPreviewKey=key;hqRoot.traverse(node=>{if(node.isMesh){node.geometry?.dispose();if(Array.isArray(node.material))node.material.forEach(item=>item.dispose());else node.material?.dispose();}});hqRoot.clear();hqPreviewPeople=[];hqPreviewScreens=[];const level=hq.level??0;
+function rebuildHqPreview(){const hq=state.hq??{level:0,attempts:0};const avatar=state.playerAvatar??{};const key=`${hq.level}:${hq.attempts}:${avatar.color}:${avatar.outfit}:${avatar.helmet}`;if(key===hqPreviewKey)return;hqPreviewKey=key;hqRoot.traverse(node=>{if(node.isMesh){if(!node.userData.riggedAsset)node.geometry?.dispose();if(Array.isArray(node.material))node.material.forEach(item=>item.dispose());else node.material?.dispose();}});hqRoot.clear();hqPreviewPeople=[];hqPreviewScreens=[];const level=hq.level??0;
   hqBox('hq-slab',[6.4,.22,4.7],[0,-.13,0],hqMat(level>=3?'#c9c3b4':'#8d8b7d'),hqRoot,false);hqBox('hq-back-wall',[6.4,2.1,.12],[0,1.02,-2.3],hqMat(level>=3?'#e5e0d3':'#c8c4b6'));hqBox('hq-left-wall',[.12,2.1,4.7],[-3.15,1.02,0],hqMat(level>=2?'#ded9cc':'#bdbbad'));
   hqDesk(-.75,.35);hqBox('hq-printer',[.58,.48,.52],[-2.35,.28,-1.35],hqMat('#d9ded9',.35,.16));hqBox('hq-paper',[.34,.03,.42],[-2.35,.55,-1.34],hqMat('#f3f0e7'),hqRoot,false);
   if(level===0){hqBox('hq-folding-chair',[.48,.08,.46],[-.7,.39,1.12],hqMat('#65716a'));for(let i=0;i<4;i++)hqBox('hq-failure-box',[.55,.35,.48],[1.45+(i%2)*.62,.18,-.9+Math.floor(i/2)*.55],hqMat(i%2?'#b57b45':'#c98c50'));}
@@ -841,7 +943,14 @@ function rebuildHqPreview(){const hq=state.hq??{level:0,attempts:0};const avatar
   if(level>=4){const glass=new THREE.MeshPhysicalMaterial({color:'#91cfd0',transparent:true,opacity:.32,roughness:.1,transmission:.2});hqBox('hq-glass',[2.6,1.8,.04],[1.45,.9,-.35],glass);hqBox('hq-sign',[1.35,.45,.06],[-1.65,1.45,-2.21],new THREE.MeshStandardMaterial({color:'#ddff55',emissive:'#8fa82e',emissiveIntensity:.45}));}
   const colors=['#ddff55','#69bfe8','#a58ae1','#d87561','#69daa9'];for(let i=0;i<Math.min(5,1+level);i++)hqPerson(-1.6+i*.72,1.25-(i%2)*.6,colors[i],i);
 }
-function renderHqPreview(now){if(!refs.menu.classList.contains('visible'))return;rebuildHqPreview();const stage=refs.hqCanvas.parentElement;const width=Math.floor(stage.clientWidth),height=Math.floor(stage.clientHeight);if(!width||!height)return;hqRenderer.setSize(width,height,false);const aspect=width/height;hqCamera.left=-4.2*aspect;hqCamera.right=4.2*aspect;hqCamera.top=4.2;hqCamera.bottom=-4.2;hqCamera.updateProjectionMatrix();const t=now*.001;hqPreviewPeople.forEach((person,index)=>{const u=person.userData;const phase=t*(.55+index*.08)+index*1.7;person.position.x=u.baseX+Math.sin(phase)*(.18+index*.035);person.position.z=u.baseZ+Math.cos(phase*.82)*.16;person.rotation.y=Math.atan2(Math.cos(phase),-Math.sin(phase*.82));const swing=Math.sin(t*7.2+index)*.38;u.leftLeg.rotation.x=swing;u.rightLeg.rotation.x=-swing;u.leftArm.rotation.x=-swing*.7;u.rightArm.rotation.x=swing*.7;if(u.playerAura){const pulse=1+Math.sin(t*3.2)*.08;u.playerAura.scale.setScalar(pulse);}});hqPreviewScreens.forEach((screen,index)=>{screen.material.emissiveIntensity=.28+Math.abs(Math.sin(t*1.8+index))*.55;});hqRenderer.render(hqScene,hqCamera);}
+function renderHqPreview(now){
+  if(!refs.menu.classList.contains('visible'))return;rebuildHqPreview();
+  const stage=refs.hqCanvas.parentElement;const width=Math.floor(stage.clientWidth),height=Math.floor(stage.clientHeight);if(!width||!height)return;
+  hqRenderer.setSize(width,height,false);const aspect=width/height;hqCamera.left=-4.2*aspect;hqCamera.right=4.2*aspect;hqCamera.top=4.2;hqCamera.bottom=-4.2;hqCamera.updateProjectionMatrix();
+  const t=now*.001;const characterDelta=Math.min(.05,Math.max(0,(now-lastHqCharacterFrame)/1000));lastHqCharacterFrame=now;
+  hqPreviewPeople.forEach((person,index)=>{const u=person.userData;u.characterMixer?.update(characterDelta);setPersonMotion(person,'walk');const phase=t*(.55+index*.08)+index*1.7;person.position.x=u.baseX+Math.sin(phase)*(.18+index*.035);person.position.z=u.baseZ+Math.cos(phase*.82)*.16;person.rotation.y=Math.atan2(Math.cos(phase),-Math.sin(phase*.82));const swing=Math.sin(t*7.2+index)*.38;u.leftLeg.rotation.x=swing;u.rightLeg.rotation.x=-swing;u.leftArm.rotation.x=-swing*.7;u.rightArm.rotation.x=swing*.7;if(u.playerAura){const pulse=1+Math.sin(t*3.2)*.08;u.playerAura.scale.setScalar(pulse);}});
+  hqPreviewScreens.forEach((screen,index)=>{screen.material.emissiveIntensity=.28+Math.abs(Math.sin(t*1.8+index))*.55;});hqRenderer.render(hqScene,hqCamera);
+}
 
 function makeDesk(x, z, rotation = 0) {
   const group = new THREE.Group();
@@ -1050,6 +1159,17 @@ function makeOffice() {
     const crate=box('crate',[.55,.45+(i%2)*.2,.55],[x,.23+(i%2)*.1,z],mat(i%2?'#b27a44':'#c68d50'),sceneProps.crates);
     crate.rotation.y=(i*.37);
   });
+  // What the client calls "the existing office": mismatched furniture and
+  // partitions that must physically leave before the new fit-out can appear.
+  sceneProps.legacyInterior=new THREE.Group();sceneProps.legacyInterior.name='legacy-interior';office.add(sceneProps.legacyInterior);
+  [[-2.8,.35,'#786d62'],[-1.25,.55,'#67766f'],[.35,.3,'#8a6c57'],[1.8,.65,'#666f77'],[-1.75,2.1,'#75695f'],[.45,2.25,'#596d66']].forEach(([x,z,color],index)=>{
+    const oldDesk=makeDesk(x,z,index%2?Math.PI:.06);oldDesk.name='legacy-desk';office.remove(oldDesk);sceneProps.legacyInterior.add(oldDesk);
+    oldDesk.traverse(node=>{if(node.isMesh&&node.name==='desk-top')node.material=mat(color,.82);});
+  });
+  const oldCabinet=box('legacy-cabinet',[1.05,1.25,.42],[2.85,.63,1.35],mat('#7b766d',.88),sceneProps.legacyInterior);oldCabinet.rotation.y=.08;
+  const oldPartitionA=box('legacy-partition',[3.15,1.5,.1],[-.65,.76,1.15],mat('#b5aa93',.9),sceneProps.legacyInterior);oldPartitionA.rotation.y=.03;
+  const oldPartitionB=box('legacy-partition',[.1,1.5,2.25],[1.15,.76,.15],mat('#a99f8b',.9),sceneProps.legacyInterior);oldPartitionB.rotation.y=-.04;
+  sceneProps.legacyInterior.children.forEach(child=>{child.userData.legacyBasePosition=child.position.clone();child.userData.legacyBaseScale=child.scale.clone();});
   // Paint cans and protective sheets.
   sceneProps.paint = new THREE.Group(); office.add(sceneProps.paint);
   for(let i=0;i<3;i++) {
@@ -1070,6 +1190,11 @@ function makeOffice() {
   [[-1.8,.2],[2.7,1.4],[.8,-.9],[-.8,2.8],[3.4,.4]].forEach(([x,z],i)=>{
     const scrap=box('debris',[.18+i*.025,.04,.1+i*.03],[x,.055,z],mat(i%2?'#d8c6a4':'#848d86'),sceneProps.debris,false); scrap.rotation.y=i*.9;
   });
+  sceneProps.greenfieldFoundation=new THREE.Group();office.add(sceneProps.greenfieldFoundation);
+  box('foundation-slab',[9.45,.22,7.15],[0,.03,0],mat('#9d9c91',.92),sceneProps.greenfieldFoundation,false);
+  sceneProps.greenfieldFrame=new THREE.Group();office.add(sceneProps.greenfieldFrame);
+  for(const x of [-4.35,-1.45,1.45,4.35])for(const z of [-3.15,0,3.15])box('frame-column',[.16,2.15,.16],[x,1.08,z],mat('#7d8988',.38,.35),sceneProps.greenfieldFrame);
+  for(const z of [-3.15,0,3.15])box('frame-beam',[8.85,.16,.16],[0,2.1,z],mat('#7d8988',.38,.35),sceneProps.greenfieldFrame);
   // Physical construction layers. Their geometry grows with task progress instead
   // of teleporting from a spreadsheet state into a finished office.
   sceneProps.partitions=new THREE.Group();sceneProps.partitions.name='build-partitions';office.add(sceneProps.partitions);
@@ -1260,9 +1385,28 @@ async function loadCharacterAssets() {
   pendingCharacterUpgrades.clear();
 }
 
+const PROP_ASSETS={
+  desk:'./assets/props/kenney-furniture/desk.glb',chair:'./assets/props/kenney-furniture/chair-desk.glb',laptop:'./assets/props/kenney-furniture/laptop.glb',
+  sofa:'./assets/props/kenney-furniture/lounge-sofa.glb',bookcase:'./assets/props/kenney-furniture/bookcase.glb',coffee:'./assets/props/kenney-furniture/coffee-machine.glb',plant:'./assets/props/kenney-furniture/plant.glb',
+};
+
+async function loadPropAssets() {
+  const {GLTFLoader}=await import('three/addons/loaders/GLTFLoader.js');const loader=new GLTFLoader();const templates=new Map();
+  await Promise.all(Object.entries(PROP_ASSETS).map(async([key,url])=>{try{templates.set(key,(await loader.loadAsync(url)).scene);}catch(error){console.warn(`Prop asset ${key} unavailable; keeping procedural furniture.`,error);}}));
+  if(!templates.size)return;
+  const fitout=new THREE.Group();fitout.name='kenney-fitout';fitout.userData.ready=true;sceneProps.kenneyFitout=fitout;office.add(fitout);sceneProps.kenneyStations=[];
+  const addModel=(key,parent,x,y,z,scale=1,rotation=0)=>{const source=templates.get(key);if(!source)return null;const model=source.clone(true);model.name=`kenney-${key}`;model.position.set(x,y,z);model.scale.setScalar(scale);model.rotation.y=rotation;model.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;}});parent.add(model);return model;};
+  for(let index=0;index<8;index++){
+    const station=new THREE.Group();station.name='kenney-workstation';station.userData.stationIndex=index;station.position.set(-.55+(index%4)*1.35,.02,.25+Math.floor(index/4)*1.12);station.rotation.y=Math.floor(index/4)%2?Math.PI:0;fitout.add(station);sceneProps.kenneyStations.push(station);
+    addModel('desk',station,0,0,0,.68);addModel('chair',station,0,0,.64,.62,Math.PI);addModel('laptop',station,.12,.7,-.03,.58,Math.PI);
+  }
+  addModel('sofa',fitout,-3.35,.02,2.48,.82);addModel('bookcase',fitout,-4.18,.02,.55,.72,Math.PI/2);addModel('coffee',fitout,.32,.86,-3.18,.62);addModel('plant',fitout,1.95,.02,-2.85,.76);
+  syncSceneFromState();
+}
+
 function addRigAccessories(person,{role,color,profile,avatar}) {
   const isPlayer=role==='player';
-  const isWorker=['worker','foreman','moving','paint','electric','furniture','cleaning','delivery'].includes(role)||(isPlayer&&avatar?.outfit!=='suit');
+  const isWorker=['worker','foreman','moving','demolition','construction','engineering','paint','electric','furniture','cleaning','delivery'].includes(role)||(isPlayer&&avatar?.outfit!=='suit');
   const accessoryRoot=new THREE.Group();accessoryRoot.name='rig-accessories';person.add(accessoryRoot);
   if(isPlayer&&!isWorker){
     const helmetColor=avatar?.helmet==='visor'?'#202a2b':'#f4f5ee';
@@ -1287,7 +1431,7 @@ function addRigAccessories(person,{role,color,profile,avatar}) {
   if(role==='furniture')box('rig-furniture-panel',[.56,.09,.34],[0,.55,.31],mat('#9b704b'),accessoryRoot).rotation.x=-.08;
   if(role==='paint'){const roller=new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,.72,8),mat('#59645e'));roller.position.set(.31,.63,.08);roller.rotation.z=-.2;accessoryRoot.add(roller);box('rig-roller-head',[.25,.07,.08],[.39,.96,.08],mat('#e5e1d5'),accessoryRoot);}
   if(role==='cleaning'){const mop=new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,.9,8),mat('#718078'));mop.position.set(.34,.52,.08);mop.rotation.z=-.28;accessoryRoot.add(mop);box('rig-mop-head',[.3,.045,.14],[.46,.08,.08],mat('#78cbb0'),accessoryRoot);}
-  if(role==='electric')box('rig-tool-bag',[.18,.2,.13],[.25,.46,-.02],mat('#284a5e'),accessoryRoot);
+  if(['electric','engineering','construction','demolition'].includes(role))box('rig-tool-bag',[.18,.2,.13],[.25,.46,-.02],mat(role==='demolition'?'#5b4437':'#284a5e'),accessoryRoot);
   if(role==='foreman'||isPlayer)box('rig-tablet',[.23,.32,.028],[-.3,.63,.16],mat('#263b40',.28,.2),accessoryRoot);
 }
 
@@ -1298,7 +1442,7 @@ function rigMaterialColor(name,{role,color,profile,avatar}) {
   if(key.includes('hair'))return profile.hair;
   if(key.includes('hat'))return role==='player'?'#f4f5ee':role==='foreman'?'#f4f5ee':role==='police'?'#17345a':role==='medic'?'#e6efeb':'#f2c84e';
   if(key.includes('vest')||key==='black')return roleColor;
-  if(key.includes('shirt'))return ['worker','moving','paint','electric','furniture','cleaning','delivery','foreman','player'].includes(role)?new THREE.Color(roleColor).lerp(new THREE.Color('#dbe6dc'),.42):'#edf1ec';
+  if(key.includes('shirt'))return ['worker','moving','demolition','construction','engineering','paint','electric','furniture','cleaning','delivery','foreman','player'].includes(role)?new THREE.Color(roleColor).lerp(new THREE.Color('#dbe6dc'),.42):'#edf1ec';
   if(key.includes('detail'))return role==='architect'?'#d1b45c':role==='client'?'#d87561':'#b9d6c9';
   if(key.includes('pants'))return role==='police'?'#172c48':'#33433f';
   if(key.includes('belt'))return '#29312f';
@@ -1351,7 +1495,7 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
   const person=new THREE.Group();
   profile ??= createPersonProfile(role, state.visualSeed ?? 1, variant);
   skin=profile.skin??skin;
-  const isPlayer=role==='player';const isWorker=['worker','foreman','moving','paint','electric','furniture','cleaning','delivery'].includes(role)||(isPlayer&&avatar?.outfit!=='suit');
+  const isPlayer=role==='player';const isWorker=['worker','foreman','moving','demolition','construction','engineering','paint','electric','furniture','cleaning','delivery'].includes(role)||(isPlayer&&avatar?.outfit!=='suit');
   const isForeman=role==='foreman';
   const isSuit=['client','boss','inspector'].includes(role)||(isPlayer&&avatar?.outfit==='suit');
   const trouserColor=isSuit?'#1e2b33':role==='architect'?'#27302e':role==='police'?'#172c48':role==='medic'?'#d8e4df':'#343e39';
@@ -1381,7 +1525,7 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
     if(isPlayer&&avatar?.helmet==='visor')box('player-visor',[.25,.16,.025],[0,1.1,.16],new THREE.MeshPhysicalMaterial({color:'#8bcad0',transparent:true,opacity:.42,roughness:.08}),person);
     const vest=box('safety-vest',[.29,.24,.17],[0,.7,.075],mat(isForeman?'#d9f45b':color,.7),person);
     box('vest-stripe',[.3,.026,.178],[0,.68,.079],mat('#eef3dc',.45,.05),person);
-    if(role==='electric') box('tool-bag',[.16,.18,.12],[.23,.44,-.03],mat('#284a5e'),person);
+    if(['electric','engineering','construction','demolition'].includes(role)) box('tool-bag',[.16,.18,.12],[.23,.44,-.03],mat(role==='demolition'?'#5b4437':'#284a5e'),person);
     if(role==='paint') {
       const roller=new THREE.Mesh(new THREE.CylinderGeometry(.02,.02,.65,8),mat('#59645e')); roller.position.set(.32,.58,.02); roller.rotation.z=-.15; person.add(roller);
       box('roller-head',[.25,.07,.08],[.37,.9,.02],mat('#e5e1d5'),person);
@@ -1478,17 +1622,17 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
 function makeCrewMesh(crew) {
   const group = new THREE.Group();
   const role=crew.id==='foreman'?'player':crew.skill==='design'?'architect':crew.skill==='documentation'?'foreman':crew.supportRole==='procurement'?'client':crew.supportRole?'foreman':crew.skill;
-  const areaWorkers=Math.min(3,Math.floor((state.selectedOrder?.area??280)/700));
-  const count=crew.id==='foreman'||crew.id.startsWith('team-')?1:2+areaWorkers+((state.visualSeed??1)+crew.id.length)%2;
+  const count=crewHeadcount(state,crew);
   const people=[];
   for(let i=0;i<count;i++) {
     const profile=createPersonProfile(role,(state.visualSeed??1)+crew.id.length*41,i);
     const person=makePerson({role,color:crew.color,variant:i,profile,avatar:crew.id==='foreman'?state.playerAvatar:null});
-    person.userData.crewId=crew.id;person.userData.company=crew.name;
-    if(crew.id.startsWith('team-'))person.userData.job=crew.role;
-    person.position.set((i-.5*(count-1))*.38,0,i*.18);person.userData.baseLocal=person.position.clone();person.rotation.y=i?.28:-.16; group.add(person); people.push(person);
+    person.userData.crewId=crew.id;person.userData.company=crew.id==='foreman'?(state.organization?.name??'Ваша организация'):crew.name;
+    if(crew.id.startsWith('team-')){person.userData.job=crew.role;person.userData.displayName=crew.name;}
+    const columns=Math.min(3,Math.ceil(Math.sqrt(count)));const row=Math.floor(i/columns),column=i%columns;const rows=Math.ceil(count/columns);
+    person.position.set((column-(columns-1)/2)*.36,0,(row-(rows-1)/2)*.3);person.userData.baseLocal=person.position.clone();person.rotation.y=(column-(columns-1)/2)*.18;group.add(person);people.push(person);
   }
-  group.userData={crewId:crew.id,people}; group.position.set(siteX(crew.x),.03,siteZ(crew.y)); office.add(group); crewMeshes.set(crew.id,group); return group;
+  group.userData={crewId:crew.id,people};group.position.copy(crewStagingPoint(crew,state.crews.indexOf(crew)));office.add(group);crewMeshes.set(crew.id,group);return group;
 }
 
 function syncEventActors() {
@@ -1511,10 +1655,13 @@ function syncEventActors() {
 }
 
 loadCharacterAssets().catch(error=>console.warn('Rigged characters failed to initialize; lightweight fallback remains active.',error));
+loadPropAssets().catch(error=>console.warn('Curated office props failed to initialize; procedural furniture remains active.',error));
 makeOffice();
 sceneProps.scalableAssets=office.children.filter(child=>![sceneProps.yard,sceneProps.architect,sceneProps.client].includes(child));
 sceneProps.scalableAssets.forEach(child=>{child.userData.baseTransform={position:child.position.clone(),scale:child.scale.clone()};});
 makeTaskMarkers();
+playerMoveMarker=new THREE.Mesh(new THREE.RingGeometry(.2,.34,32),new THREE.MeshBasicMaterial({color:'#ddff55',transparent:true,opacity:.92,side:THREE.DoubleSide,depthWrite:false}));
+playerMoveMarker.name='player-move-target';playerMoveMarker.rotation.x=-Math.PI/2;playerMoveMarker.position.y=.045;playerMoveMarker.visible=false;office.add(playerMoveMarker);
 
 function updateCamera(t=0) {
   const scale=footprintScale();const distance=13*Math.max(1,scale*.9);
@@ -1552,16 +1699,29 @@ function syncSceneFromState() {
   }
 
   const siteType=visualProfile.site;
-  const prepStage=state.tasks.find(task=>task.id==='prep');
-  const paintStage=state.tasks.find(task=>task.id==='paint');
-  const structureReady=siteType!=='field'||prepStage?.status==='done'||(prepStage?.progress??0)>.35;
-  const fitoutReady=siteType==='existing'||paintStage?.status==='done'||(paintStage?.progress??0)>.45;
+  const taskById=(id)=>state.tasks.find(task=>task.id===id);const progressOf=(task)=>task?.status==='done'||task?.status==='skipped'?1:task?.progress??0;const averageProgress=(ids)=>{const tasks=ids.map(taskById).filter(Boolean);return tasks.length?tasks.reduce((sum,task)=>sum+progressOf(task),0)/tasks.length:0;};
+  const moveTask=taskById('move');
+  const electricTask=taskById('electric')??taskById('external-networks');
+  const prepStage=taskById('partitions')??taskById('prep')??taskById('structure');
+  const paintStage=taskById('wall-finish')??taskById('paint');
+  const deskTask=state.tasks.find(task=>task.id==='desks');
+  const cleanTask=state.tasks.find(task=>task.id==='clean');
+  const inspectTask=state.tasks.find(task=>task.id==='inspect');
+  const shellStage=taskById('structure')??prepStage;const structureReady=siteType!=='field'||progressOf(shellStage)>.35;
+  const foundationProgress=progressOf(taskById('foundations'));const frameProgress=progressOf(taskById('structure'));
+  sceneProps.greenfieldFoundation.visible=siteType==='field'&&foundationProgress>.01;sceneProps.greenfieldFoundation.scale.y=Math.max(.02,foundationProgress);
+  sceneProps.greenfieldFrame.visible=siteType==='field'&&frameProgress>.01;sceneProps.greenfieldFrame.scale.y=Math.max(.02,frameProgress);
+  const furnitureProgress=deskTask?.status==='done'?1:deskTask?.progress??0;
+  const fitoutReady=furnitureProgress>.02;
   const structureNames=new Set(['north-wall','west-wall','window','glass-wall','core-left','core-divider','core-front-a','core-front-b','core-front-c','toilet-asset','sink-asset','toilet-sign-a','toilet-sign-b','entry-door','access-control']);
   const fitoutNames=new Set(['meeting-table','chair-asset','pantry-counter','pantry-top','fridge','high-table','storage','printer','sofa-asset','plant-asset','reception','entry-mat']);
   for(const child of office.children) {
     if(structureNames.has(child.name))child.visible=structureReady&&(child.userData.profileVisible??true);
     if(fitoutNames.has(child.name))child.visible=fitoutReady&&(child.userData.profileVisible??true);
   }
+  const upgradedFitout=Boolean(sceneProps.kenneyFitout?.userData.ready);
+  if(sceneProps.kenneyFitout)sceneProps.kenneyFitout.visible=fitoutReady;
+  if(upgradedFitout){sceneProps.sofa.visible=false;sceneProps.plants.forEach(plant=>{plant.visible=false;});}
   for (const task of state.tasks) {
     const group=markerMeshes.get(task.id); if(!group) continue;
     group.visible=task.status!=='done';
@@ -1569,11 +1729,11 @@ function syncSceneFromState() {
     group.children[1].scale.setScalar(task.status==='active' ? .6 + task.progress*.9 : 1);
     group.children[2].material.opacity=task.status==='locked'?.32:1;
   }
-  for(const crew of state.crews) if(!crewMeshes.has(crew.id)) makeCrewMesh(crew);
+  for(const crew of state.crews){const existing=crewMeshes.get(crew.id);if(existing&&existing.userData.people?.length!==crewHeadcount(state,crew)){if(selectedPerson?.userData?.crewId===crew.id)selectedPerson=null;office.remove(existing);crewMeshes.delete(crew.id);}if(!crewMeshes.has(crew.id))makeCrewMesh(crew);}
   for(const [crewId,mesh] of crewMeshes) {
     const crew=state.crews.find(item=>item.id===crewId);
     mesh.visible=Boolean(crew)&&((crew.unavailableUntil??0)<=state.elapsed);
-    if(mesh.userData.people?.length>1) mesh.userData.people[1].visible=!state.smokeBreak;
+    mesh.userData.people?.forEach(person=>{person.visible=true;});
   }
   syncEventActors();
   const ambientKind=state.ambientBeat?.kind;
@@ -1581,17 +1741,21 @@ function syncSceneFromState() {
   sceneProps.smokers.forEach((smoker,index)=>{smoker.visible=state.started&&(index===0||state.smokeBreak||ambientBreak);});
   sceneProps.smokePuffs.forEach(puff=>{puff.visible=state.started&&(state.smokeBreak||ambientBreak||sceneProps.smokers[0]?.visible);});
 
-  const moveTask=state.tasks.find(t=>t.id==='move');
-  const electricTask=state.tasks.find(t=>t.id==='electric');
-  const prepTask=state.tasks.find(t=>t.id==='prep');
-  const paintTask=state.tasks.find(t=>t.id==='paint');
-  const deskTask=state.tasks.find(t=>t.id==='desks');
-  const cleanTask=state.tasks.find(t=>t.id==='clean');
-  const inspectTask=state.tasks.find(t=>t.id==='inspect');
+  const prepTask=prepStage;
+  const paintTask=paintStage;
 
-  const prepProgress=prepTask?.status==='done'?1:prepTask?.progress??0;
-  const partitionBase=siteType==='existing'?.18:0;
-  const partitionProgress=Math.max(partitionBase,prepProgress);
+  const demolitionProgress=averageProgress(['move','demo-partitions','demo-equipment','demo-floor','demo-ceiling']);
+  sceneProps.legacyInterior.visible=siteType==='existing'&&demolitionProgress<.999;
+  sceneProps.legacyInterior.children.forEach((asset,index)=>{
+    const removal=THREE.MathUtils.clamp(demolitionProgress*sceneProps.legacyInterior.children.length-index,0,1);
+    const remaining=1-removal;const basePosition=asset.userData.legacyBasePosition;const baseScale=asset.userData.legacyBaseScale;
+    asset.visible=sceneProps.legacyInterior.visible&&remaining>.015;
+    asset.position.set(THREE.MathUtils.lerp(basePosition.x,4.2,removal),basePosition.y,THREE.MathUtils.lerp(basePosition.z,3.15,removal));
+    asset.scale.set(baseScale.x*Math.max(.08,remaining),baseScale.y*Math.max(.08,remaining),baseScale.z*Math.max(.08,remaining));
+  });
+
+  const prepProgress=progressOf(prepTask);
+  const partitionProgress=prepProgress;
   sceneProps.partitions.visible=partitionProgress>.01;
   sceneProps.partitionStuds.visible=partitionProgress>.01&&partitionProgress<.99;
   sceneProps.partitionSegments.forEach((wall,index)=>{
@@ -1607,7 +1771,7 @@ function syncSceneFromState() {
     if(!stud.userData.isTrack){stud.scale.y=Math.max(.025,fraction);stud.position.y=.03+.75*fraction;}
   });
 
-  const engineeringProgress=electricTask?.status==='done'?1:electricTask?.progress??0;
+  const engineeringProgress=averageProgress(['external-networks','hvac','electric','lowcurrent','fire','plumbing','lighting']);
   sceneProps.engineering.visible=engineeringProgress>.01;
   sceneProps.engineeringSegments.forEach((segment,index)=>{
     const fraction=THREE.MathUtils.clamp(engineeringProgress*sceneProps.engineeringSegments.length-index,0,1);
@@ -1618,7 +1782,7 @@ function syncSceneFromState() {
   const ceilingCount=Math.round(engineeringProgress*sceneProps.ceilingTiles.children.length);
   sceneProps.ceilingTiles.children.forEach((panel,index)=>{panel.visible=index<ceilingCount;panel.position.y=2.32+Math.min(1,engineeringProgress*sceneProps.ceilingTiles.children.length-index)*.2;});
 
-  const finishProgress=paintTask?.status==='done'?1:paintTask?.progress??0;
+  const finishProgress=averageProgress(['wall-finish','floor-finish','ceiling-finish','paint']);
   sceneProps.finishBands.children.forEach((band,index)=>{const fraction=THREE.MathUtils.clamp(finishProgress*sceneProps.finishBands.children.length-index,0,1);band.visible=fraction>.01;band.scale.y=Math.max(.02,fraction);band.position.y=.04+.73*fraction;band.material.color.set(state.sceneEffect?.wallColor??visualProfile.theme.wall);});
   sceneProps.handover.visible=inspectTask?.status==='done'||(inspectTask?.progress??0)>.65;
 
@@ -1628,18 +1792,21 @@ function syncSceneFromState() {
   const layoutDeskCount=Math.min(sceneProps.desks.length,Math.max(4,Math.round((state.selectedOrder?.area??600)/180)));
   const deskAmount=deskTask?.status==='done'?layoutDeskCount:deskTask?.status==='active'?Math.max(1,Math.ceil(deskTask.progress*layoutDeskCount)):0;
   sceneProps.desks.forEach((desk,index)=>{
-    desk.visible=index<deskAmount;
+    desk.visible=!upgradedFitout&&index<deskAmount;
     if(desk.visible){const build=Math.min(1,Math.max(.18,(deskTask?.progress??1)*sceneProps.desks.length-index));desk.scale.y=build;}
   });
+  sceneProps.kenneyStations?.forEach((station,index)=>{station.visible=index<deskAmount;});
 
-  const prepStarted=['active','done'].includes(prepTask?.status);
-  const paintDone=paintTask?.status==='done';
-  sceneProps.protection.visible=prepStarted&&!paintDone;
-  sceneProps.paint.visible=prepStarted&&!paintDone;
-  sceneProps.cables.visible=electricTask?.status!=='done';
-  const constructionStarted=state.tasks.some(task=>task.id!=='survey'&&['active','done'].includes(task.status));
-  sceneProps.debris.visible=constructionStarted&&cleanTask?.status!=='done';
-  const activePhysical=state.tasks.find(task=>task.status==='active'&&['move','electric','prep','paint','desks','clean'].includes(task.id));
+  const protectionTask=taskById('protection');const prepStarted=['active','done','awaiting'].includes(prepTask?.status);
+  const paintDone=progressOf(paintTask)>=.999;
+  sceneProps.protection.visible=protectionTask?['active','done','awaiting'].includes(protectionTask.status)&&!paintDone:prepStarted&&!paintDone;
+  sceneProps.paint.visible=['active','awaiting'].includes(paintTask?.status)&&!paintDone;
+  const temporaryTask=taskById('temporary-networks');sceneProps.cables.visible=temporaryTask?!['done','skipped'].includes(temporaryTask.status):electricTask?.status!=='done';
+  const constructionStarted=state.tasks.some(task=>task.id!=='survey'&&['active','done','awaiting'].includes(task.status));
+  const dirtCount=Math.min(sceneProps.debris.children.length,Math.ceil((state.siteDirt??0)/100*sceneProps.debris.children.length));
+  sceneProps.debris.visible=constructionStarted&&dirtCount>0;
+  sceneProps.debris.children.forEach((item,index)=>{item.visible=sceneProps.debris.visible&&index<dirtCount;});
+  const activePhysical=state.tasks.find(task=>task.status==='active'&&!['management','design','documentation'].includes(task.skill));
   const ambientPhysical=['drill','cleanup','power-test'].includes(ambientKind);
   sceneProps.workParticles.forEach(particle=>{particle.visible=Boolean(activePhysical||ambientPhysical);particle.userData.taskId=activePhysical?.id??(ambientKind==='cleanup'?'clean':'electric');});
   const beatTask=state.ambientBeat?.taskId?state.tasks.find(task=>task.id===state.ambientBeat.taskId):null;
@@ -1647,7 +1814,7 @@ function syncSceneFromState() {
   if(sceneProps.measureTape.visible){sceneProps.measureTape.position.set(siteX(beatTask?.x??3.6),.02,siteZ(beatTask?.y??2.5));}
   sceneProps.beacon.visible=ambientKind==='delivery';
 
-  const electricPower=state.sceneEffect?.lightPower??(electricTask?.status==='done'?1:electricTask?.status==='active'?electricTask.progress:0);
+  const electricPower=state.sceneEffect?.lightPower??Math.max(progressOf(electricTask),progressOf(taskById('lighting')));
   sceneProps.lights.forEach(light=>{light.intensity=electricPower*1.15;light.userData.fixture.material.emissive?.set('#fff0bc');light.userData.fixture.material.emissiveIntensity=electricPower*1.6;});
 
   const north=office.children.find(child=>child.name==='north-wall');
@@ -1667,7 +1834,7 @@ function syncSceneFromState() {
   sceneProps.client.visible=state.started&&(state.elapsed>10||['inspection','briefing'].includes(ambientKind)||['ready','active','done'].includes(inspectTask?.status));
   if(state.sceneEffect?.debris) {
     const visibleCount=Math.min(sceneProps.debris.children.length,Math.max(0,state.sceneEffect.debris));
-    sceneProps.debris.children.forEach((item,index)=>{item.visible=sceneProps.debris.visible&&index<visibleCount;});
+    sceneProps.debris.visible=visibleCount>0;sceneProps.debris.children.forEach((item,index)=>{item.visible=index<Math.max(dirtCount,visibleCount);});
   }
 }
 
@@ -1677,9 +1844,11 @@ function indexedFieldColor(tile) {
 }
 
 function animateScene(now) {
-  const t=now*.001;
-  const characterDelta=Math.min(.05,Math.max(0,(now-lastCharacterFrame)/1000));lastCharacterFrame=now;
-  if(!state.paused)office.traverse(node=>{node.userData?.characterMixer?.update(characterDelta);});
+  const frameDelta=Math.min(.05,Math.max(0,(now-lastCharacterFrame)/1000));lastCharacterFrame=now;
+  if(!state.paused)sceneAnimationTime+=frameDelta;
+  const t=sceneAnimationTime;
+  const characterDelta=state.paused?0:frameDelta;
+  if(characterDelta)office.traverse(node=>{node.userData?.characterMixer?.update(characterDelta);});
   const beat=state.ambientBeat;
   const beatKind=beat?.kind;
   const dayProgress=THREE.MathUtils.clamp((state.elapsed%24)/9,0,1);
@@ -1698,37 +1867,48 @@ function animateScene(now) {
     const inBeat=beat?.crewId===crew.id;
     const groupMoment=inBeat&&['argument','briefing','inspection'].includes(beatKind);
     const sceneRunning=state.started&&!state.paused;
-    const patrol=Boolean(crew.taskId||crew.id==='foreman'||crew.id.startsWith('team-')||sceneRunning);
-    const wander=groupMoment?.08:patrol?(crew.taskId ? .62 : .92):0;
-    const phase=crewIndex*1.73;
-    const routeX=Math.sin(t*.72+phase)+Math.sin(t*.31+phase*.7)*.34;
-    const routeZ=Math.cos(t*.58+phase*.82)+Math.sin(t*.37+phase)*.28;
-    const target=new THREE.Vector3(siteX(crew.x)+routeX*wander,.03,siteZ(crew.y)+routeZ*wander);
+    const isPlayerCrew=crew.id==='foreman';
+    const manualPlayerMove=isPlayerCrew&&Boolean(playerMoveTarget);
+    const smoking=!isPlayerCrew&&sceneRunning&&crewTakesBreak(crew,t);
+    const maintenance=!isPlayerCrew&&crew.skill==='cleaning'&&!crew.taskId&&(state.siteDirt??0)>3&&!smoking;
+    const activeWork=Boolean(crew.taskId)&&!smoking;
+    const baseTarget=manualPlayerMove?playerMoveTarget.clone():isPlayerCrew?mesh.position.clone():smoking?crewSmokePoint(crew,crewIndex):maintenance?crewCleaningPoint(crew,crewIndex):activeWork?crewWorkPoint(crew,crewIndex):crewStagingPoint(crew,crewIndex);
+    const routeKey=manualPlayerMove?`player:${baseTarget.x.toFixed(2)}:${baseTarget.z.toFixed(2)}`:smoking?'smoke':maintenance?`clean:${Math.floor(t/9)}`:activeWork?`work:${crew.taskId}`:'idle';
+    const target=isPlayerCrew&&!manualPlayerMove?baseTarget:routedCrewWaypoint(mesh,baseTarget,routeKey,crew,smoking);
     const delta=target.clone().sub(mesh.position);
-    const siteWalking=patrol&&!groupMoment&&delta.lengthSq()>.00012;
+    const siteWalking=sceneRunning&&!groupMoment&&delta.lengthSq()>.018;
     if(siteWalking)mesh.rotation.y=THREE.MathUtils.lerp(mesh.rotation.y,Math.atan2(delta.x,delta.z),.12);
-    mesh.position.lerp(target,sceneRunning?.078:.035);
-    if(patrol) {
+    if(siteWalking){
+      const direction=delta.normalize();if(!isPlayerCrew)direction.add(crewSeparation(mesh).multiplyScalar(.72)).normalize();
+      const speed=manualPlayerMove?2.35:.8+crewDiscipline(crew)*.85;mesh.position.addScaledVector(direction,Math.min(mesh.position.distanceTo(target),characterDelta*speed));mesh.position.y=.03;
+    }
+    crew.visualBehavior=siteWalking?(smoking?'to-smoke':maintenance?'to-clean':activeWork?'to-work':'moving'):smoking?'smoking':maintenance?'cleaning':activeWork?'working':'idle';
+    if(manualPlayerMove&&sceneRunning&&mesh.position.distanceTo(playerMoveTarget)<.08){
+      mesh.position.copy(playerMoveTarget);playerMoveTarget=null;state.playerZoneTaskId=playerMoveZoneTaskId;playerMoveZoneTaskId=null;playerMoveMarker.visible=false;
+      crew.state=state.playerZoneTaskId?'supervising':'idle';renderSelection();persistGame();showToast(state.playerZoneTaskId?'Вы на месте. Этот фронт теперь под личным присмотром.':'Вы на месте. Здесь особенно хорошо видно, кто не работает.','done');
+    }
+    if(siteWalking||activeWork||maintenance||groupMoment||smoking) {
       mesh.position.y=.03+Math.abs(Math.sin(t*7.4+crew.x))*(siteWalking?.038:.012);
       for(const [index,person] of mesh.userData.people.entries()) {
-        const physical=['moving','paint','electric','furniture','cleaning'].includes(crew.skill)&&crew.taskId&&!groupMoment;
+        const physical=['moving','demolition','construction','engineering','paint','electric','furniture','cleaning'].includes(crew.skill)&&(activeWork||maintenance)&&!groupMoment;
+        const transporting=['moving','furniture'].includes(crew.skill)&&physical;
         const deliveryCycle=(t*.105+crewIndex*.17)%1;
-        const travel=physical&&index===0?(deliveryCycle<.42?THREE.MathUtils.smoothstep(deliveryCycle,0,.42):deliveryCycle<.56?1:THREE.MathUtils.smoothstep(1-deliveryCycle,0,.44)):0;
+        const travel=transporting&&index===0?(deliveryCycle<.42?THREE.MathUtils.smoothstep(deliveryCycle,0,.42):deliveryCycle<.56?1:THREE.MathUtils.smoothstep(1-deliveryCycle,0,.44)):0;
         const base=person.userData.baseLocal;
         const yardDx=(6.25+(footprintScale()-1)*5.2)-mesh.position.x;const yardDz=1.2-mesh.position.z;const crewCos=Math.cos(mesh.rotation.y);const crewSin=Math.sin(mesh.rotation.y);
         const yardX=crewCos*yardDx-crewSin*yardDz;const yardZ=crewSin*yardDx+crewCos*yardDz;
         person.position.x=THREE.MathUtils.lerp(base.x+Math.sin(t*1.65+index)*.1,yardX,travel);person.position.z=THREE.MathUtils.lerp(base.z+Math.cos(t*1.35+index)*.12,yardZ,travel);
         const walking=(travel>.03&&travel<.97)||(siteWalking&&travel<.03);const swing=Math.sin(t*(walking?11.4:6.8)+index)*(.3+(walking?.48:.08));
-        const workBeat=crew.taskId?Math.sin(t*4.6+index):0;
+        const workBeat=(activeWork||maintenance)?Math.sin(t*4.6+index):0;
         person.userData.leftLeg.rotation.x=swing; person.userData.rightLeg.rotation.x=-swing;
         const argumentMotion=inBeat&&beatKind==='argument'?Math.sin(t*7.4+index)*.72:0;
         const briefingPose=inBeat&&beatKind==='briefing'?(index%2?-.25:.3):0;
-        const paintMotion=crew.skill==='paint'&&!walking?workBeat*1.02:0;const drillMotion=(crew.skill==='electric'||beatKind==='drill')&&!walking?Math.sin(t*21+index)*.62:0;const carryPose=walking&&physical?-.86:0;
-        person.userData.leftArm.rotation.x=-swing*.55+paintMotion+carryPose;person.userData.rightArm.rotation.x=swing*.55+drillMotion+(crew.skill==='furniture'&&!walking?-.55:carryPose);
+        const paintMotion=crew.skill==='paint'&&!walking?workBeat*1.02:0;const cleaningMotion=crew.skill==='cleaning'&&!walking?workBeat*.92:0;const drillMotion=(['electric','engineering','construction','demolition'].includes(crew.skill)||beatKind==='drill')&&!walking?Math.sin(t*21+index)*.62:0;const carryPose=walking&&physical?-.86:0;
+        person.userData.leftArm.rotation.x=-swing*.55+paintMotion+cleaningMotion+carryPose;person.userData.rightArm.rotation.x=swing*.55+drillMotion-cleaningMotion+(crew.skill==='furniture'&&!walking?-.55:carryPose);
         person.userData.leftArm.rotation.z=argumentMotion+briefingPose;
         person.userData.rightArm.rotation.z=-argumentMotion-briefingPose;
         person.rotation.y=travel>.03?Math.atan2(yardX-base.x,yardZ-base.z)+(deliveryCycle>.56?Math.PI:0):siteWalking?0:groupMoment?(index%2?-.9:.9):Math.sin(t*.55+index)*.32;
-        person.userData.bubble.visible=!walking&&(groupMoment||Math.sin(t*.9+index*2.1+crew.x)>.78);
+        person.userData.bubble.visible=!walking&&(smoking?index===0:groupMoment||Math.sin(t*.9+index*2.1+crew.x)>.78);
         setPersonMotion(person,walking?(physical?'carry':'walk'):groupMoment&&beatKind==='argument'?'argue':physical?'work':'idle');
       }
     } else {
@@ -1745,8 +1925,9 @@ function animateScene(now) {
     const hasQuestion=(state.activeSituations??[]).some(item=>item.crewId===crew.id);
     mesh.userData.people.forEach((person,index)=>{person.userData.alertBubble.visible=hasQuestion&&index===0;if(hasQuestion)person.userData.bubble.visible=false;person.userData.selectionRing.visible=person===selectedPerson;});
   }
+  if(playerMoveMarker?.visible){const pulse=1+Math.sin(t*5.5)*.13;playerMoveMarker.scale.setScalar(pulse);playerMoveMarker.material.opacity=.72+Math.sin(t*5.5)*.2;}
 
-  const activeTask=state.tasks.find(task=>task.status==='active'&&['move','electric','prep','paint','desks','clean'].includes(task.id));
+  const activeTask=state.tasks.find(task=>task.status==='active'&&!['management','design','documentation'].includes(task.skill));
   const particleTask=activeTask??(beatKind==='cleanup'?state.tasks.find(task=>task.id==='clean'):['drill','power-test'].includes(beatKind)?state.tasks.find(task=>task.id==='electric'):null);
   for(const [index,particle] of sceneProps.workParticles.entries()) {
     if(!particle.visible||!particleTask)continue;
@@ -1852,7 +2033,21 @@ refs.canvas.addEventListener('pointerup',(event)=>{
   if(personHit){const question=(state.activeSituations??[]).find(item=>item.crewId===personHit.userData.crewId);if(question){showSituation(question);return;}selectedPerson=personHit;state.selectedTaskId=null;renderTasks();renderSelection();return;}
   let taskId=null;
   for(const hit of hits){let node=hit.object;while(node&&node!==office){if(node.userData?.taskId){taskId=node.userData.taskId;break;}node=node.parent;}if(taskId)break;}
-  if(taskId){selectedPerson=null;state.selectedTaskId=taskId;renderTasks();renderSelection();}
+  if(taskId){selectedPerson=null;state.selectedTaskId=taskId;renderTasks();renderSelection();return;}
+  const floorHit=hits.find(hit=>['floor-tile','yard-slab','slab'].includes(hit.object.name));
+  const navigationPoint=floorHit?.point.clone()??raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),-.03),new THREE.Vector3());
+  if(navigationPoint&&selectedPerson?.userData?.role==='player'){
+    const scale=footprintScale();const yardShift=(scale-1)*5.2;
+    const destination=navigationPoint.clone();destination.set(Math.max(-5.05*scale,Math.min(10.05+yardShift,destination.x)),.03,Math.max(-4.05*scale,Math.min(4.05*scale,destination.z)));
+    const player=state.crews.find(item=>item.id==='foreman');
+    if(!player)return;
+    playerMoveTarget=destination;player.state='moving';
+    player.x=destination.x/(unit*footprintScale())+4;player.y=destination.z/(unit*footprintScale())+3.4;
+    const nearbyTask=state.tasks.filter(task=>!['done','locked'].includes(task.status)).map(task=>({task,distance:destination.distanceTo(new THREE.Vector3(siteX(task.x),.03,siteZ(task.y)))})).sort((a,b)=>a.distance-b.distance)[0];
+    playerMoveZoneTaskId=nearbyTask&&nearbyTask.distance<unit*footprintScale()*1.3?nearbyTask.task.id:null;
+    state.playerZoneTaskId=null;playerMoveMarker.position.copy(destination);playerMoveMarker.visible=true;state.selectedTaskId=null;
+    renderTasks();renderSelection();persistGame();feedback('message');showToast('Маршрут принят. Технический заказчик наконец идёт туда, куда нажали.','done');
+  }
 });
 refs.canvas.addEventListener('wheel',(event)=>{event.preventDefault();cameraZoom=Math.max(.72,Math.min(1.65,cameraZoom-event.deltaY*.0007));updateCamera();},{passive:false});
 
@@ -1903,7 +2098,7 @@ document.addEventListener('click',(event)=>{
   const avatarControl=event.target.closest('[data-avatar-color],[data-avatar-outfit],[data-avatar-helmet]');
   if(avatarControl){state.playerAvatar??={color:'#ddff55',outfit:'vest',helmet:'classic'};if(avatarControl.dataset.avatarColor)state.playerAvatar.color=avatarControl.dataset.avatarColor;if(avatarControl.dataset.avatarOutfit)state.playerAvatar.outfit=avatarControl.dataset.avatarOutfit;if(avatarControl.dataset.avatarHelmet)state.playerAvatar.helmet=avatarControl.dataset.avatarHelmet;const playerMesh=crewMeshes.get('foreman');if(playerMesh){office.remove(playerMesh);crewMeshes.delete('foreman');}selectedPerson=null;hqPreviewKey='';renderMainMenu();syncSceneFromState();persistGame();showToast('Аватар обновлён. Каска по-прежнему не заменяет решение.','done');return;}
   const playerZone=event.target.closest('[data-player-zone]');
-  if(playerZone){const task=state.tasks.find(item=>item.id===playerZone.dataset.playerZone);const player=state.crews.find(item=>item.id==='foreman');if(task&&player){state.playerZoneTaskId=task.id;player.x=task.x;player.y=task.y;player.state='supervising';const mesh=crewMeshes.get(player.id);if(mesh){mesh.position.set(siteX(player.x),.03,siteZ(player.y));selectedPerson=mesh.userData.people?.[0]??null;}renderSelection();persistGame();feedback('message');showToast(`Вы перешли в зону «${task.short}». Пока вы рядом, темп +18%.`,'done');}return;}
+  if(playerZone){const task=state.tasks.find(item=>item.id===playerZone.dataset.playerZone);const player=state.crews.find(item=>item.id==='foreman');if(task&&player){playerMoveTarget=null;playerMoveZoneTaskId=null;playerMoveMarker.visible=false;state.playerZoneTaskId=task.id;player.x=task.x;player.y=task.y;player.state='supervising';const mesh=crewMeshes.get(player.id);if(mesh){mesh.position.set(siteX(player.x),.03,siteZ(player.y));selectedPerson=mesh.userData.people?.[0]??null;}renderSelection();persistGame();feedback('message');showToast(`Вы перешли в зону «${task.short}». Пока вы рядом, темп +18%.`,'done');}return;}
   const loanButton=event.target.closest('[data-loan]');
   if(loanButton){const loan=takeOrganizationLoan(state,Number(loanButton.dataset.loan),loanButton.dataset.loanRecipient??'auto');if(loan.ok){renderMainMenu();if(refs.market.classList.contains('visible'))renderPreparation();if(refs.finance.classList.contains('visible'))renderFinanceBook();renderHud();persistGame();feedback('cash');showToast(`Кредит ${money(loan.principal)} поступил ${loan.recipient==='project'?'на счёт объекта':'в кассу организации'}. Платёж ${money(loan.monthlyPayment)} каждый месяц.`,'risk');}else showToast('Кредитный комитет уже нервничает. Лимит исчерпан.','risk');}
   if(event.target.closest('[data-edit-evening-schedule]')){refs.report.classList.remove('visible');eveningEditing=true;openMasterSchedule();}
@@ -1920,6 +2115,8 @@ document.addEventListener('click',(event)=>{
   const mapHire=event.target.closest('[data-map-hire]');
   if(mapHire){const result=hireContractor(state,mapHire.dataset.mapHire);if(result.ok){state.preparationConfirmed=false;renderPreparation();renderAll();feedback('cash');showToast(`${result.contractor.company}: едут на объект. Возможно, даже на этот.`,'done');}else if(result.reason==='budget')showToast('Не хватило аванса и кассы компании. Кредитная кнопка подозрительно близко.','risk');}
   const mapUnhire=event.target.closest('[data-map-unhire]');if(mapUnhire){const result=unhireContractor(state,mapUnhire.dataset.mapUnhire);if(result.ok){state.preparationConfirmed=false;renderPreparation();renderAll();showToast(`${result.contractor.company}: мобилизация отменена, деньги возвращены.`);}}
+  const manpowerControl=event.target.closest('[data-contract-manpower]');
+  if(manpowerControl){const result=adjustContractorManpower(state,manpowerControl.dataset.contractManpower,Number(manpowerControl.dataset.manpowerDelta));if(result.ok){if(!result.pending){const mesh=crewMeshes.get(result.crew.id);if(mesh){office.remove(mesh);crewMeshes.delete(result.crew.id);if(selectedPerson?.userData?.crewId===result.crew.id)selectedPerson=null;}syncSceneFromState();}renderTeamBook();renderAll();persistGame();feedback(result.delta>0?'cash':'message');showToast(result.delta>0?`${result.contractor.company}: +1 человек оплачен за ${money(result.cost)} и выйдет ${result.pending?'завтра':'сейчас'}.`:`${result.contractor.company}: один человек снят. Теснота уменьшилась, мощность бригады тоже.` ,result.delta>0?'done':'risk');}else showToast(result.reason==='budget'?'На усиление не хватает денег.':result.reason==='max'?'Двенадцать человек — предел одной бригады. Дальше это уже митинг.':'Меньше двух человек подрядчик называет расторжением договора.','risk');}
   const dismiss=event.target.closest('[data-dismiss-contractor]');
   if(dismiss){const result=dismissContractor(state,dismiss.dataset.dismissContractor);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(`${result.contractor.company} сняты. Сегодня уже никто новый не выйдет.`,'risk');}else showToast('Менять подрядчика можно на вечернем закрытии дня.','risk');}
   const replacement=event.target.closest('[data-replace-contractor]');
@@ -1928,6 +2125,8 @@ document.addEventListener('click',(event)=>{
   if(forceAssign){const select=document.querySelector(`[data-assignment-select="${CSS.escape(forceAssign.dataset.forceAssign)}"]`);const result=forceAssignCrew(state,forceAssign.dataset.forceAssign,select?.value);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(result.mismatch?'Нагнали непрофильного специалиста: темп 55%, качество под вопросом.':'Фронт усилен профильной командой.','risk');}else showToast(result.reason==='budget'?'На этот нагон не хватает денег.':'Этот фронт уже занят или человек ещё не вышел.','risk');}
   const dayTask=event.target.closest('[data-day-task]');
   if(dayTask){const task=state.tasks.find(item=>item.id===dayTask.dataset.dayTask);if(task){if(task.enabledToday)cyclePriority(state,task.id);else task.enabledToday=true;renderDayPlan();}}
+  const skipTaskButton=event.target.closest('[data-skip-task]');
+  if(skipTaskButton){const result=skipOptionalTask(state,skipTaskButton.dataset.skipTask);if(result.ok){renderAll();syncSceneFromState();persistGame();feedback('risk');showToast(result.effect.dirt?`Укрытие пропущено: сразу +${result.effect.dirt}% мусора и риск качества.`:'Временные сети пропущены: стройка дешевле, но медленнее и нервнее.','risk');}return;}
   const scheduleDay=event.target.closest('[data-schedule-day]');
   if(scheduleDay){shiftMasterScheduleTask(state,scheduleDay.dataset.scheduleTask,Number(scheduleDay.dataset.scheduleDay));renderMasterSchedule();renderTasks();}
   const scheduleOrder=event.target.closest('[data-schedule-order]');
@@ -1952,8 +2151,16 @@ document.addEventListener('click',(event)=>{
     else if(outcome)showToast(outcome.approved?`Заказчик согласовал ещё ${money(outcome.amount)}. Теперь это тоже надо освоить.`:'Заказчик отказал: «это уже входило в исходный объём».',outcome.approved?'done':'risk');
     else showToast('Письмо отправлено. В копии 17 человек, решение теперь хотя бы ищется.');
   }
+  const startTaskButton=event.target.closest('[data-start-task]');
+  if(startTaskButton){
+    event.stopPropagation();const task=state.tasks.find(item=>item.id===startTaskButton.dataset.startTask);
+    if(task?.status==='ready'){
+      task.enabledToday=true;task.priority=Math.max(2,task.priority);const available=state.crews.find(crew=>(crew.unavailableUntil??0)<=state.elapsed&&!crew.taskId&&(crew.skill===task.skill||crew.skill==='general'));
+      renderAll();persistGame();feedback('message');showToast(available?`«${task.short}» включена в план. Свободная бригада выходит на фронт.`:`«${task.short}» включена в план и ждёт подходящую свободную бригаду.`,available?'done':'risk');
+    }
+  }
   const taskCard=event.target.closest('[data-task]');
-  if(taskCard&&!event.target.closest('[data-priority],[data-submit-task]')){selectedPerson=null;state.selectedTaskId=taskCard.dataset.task;renderTasks();renderSelection();}
+  if(taskCard&&!event.target.closest('[data-priority],[data-submit-task],[data-start-task]')){selectedPerson=null;state.selectedTaskId=taskCard.dataset.task;renderTasks();renderSelection();}
   const priority=event.target.closest('[data-priority]');
   if(priority){event.stopPropagation(); if(cyclePriority(state,priority.dataset.priority)){renderTasks();showToast('Приоритет изменён. Прораб многозначительно переставил стикер.');}}
   const submitTask=event.target.closest('[data-submit-task]');
@@ -1994,6 +2201,7 @@ $('#emailButton').addEventListener('click',()=>openCommunication('email'));
 $('#siteWhatsappButton').addEventListener('click',()=>openCommunication('whatsapp'));
 $('#siteEmailButton').addEventListener('click',()=>openCommunication('email'));
 $('#teamButton').addEventListener('click',()=>{renderTeamBook();refs.team.classList.add('visible');});
+$('#magicResolveButton').addEventListener('click',()=>{const result=tryMagicResolve(state);if(!result.ok){showToast(result.reason==='cooldown'?`Связи ещё заняты. Следующая попытка через ${Math.ceil(result.remaining)} ч.`:'Сначала выйдите на объект. Пока порешать можно только выбор заказа.','risk');return;}renderAll();syncSceneFromState();persistGame();if(!result.success){feedback('risk');showToast('«Я в пути!» прочитали. Никто не понял, что именно вы собирались решить. Попытка потрачена.','risk');return;}feedback(result.outcome==='money'?'cash':'done');const message=result.outcome==='acceptance'?`Порешали: закрыто работ — ${result.accepted}${result.payment?`, пришло ${money(result.payment)}`:''}.`:result.outcome==='money'?`Порешали: на объект поступило ${money(result.amount)}.`:`Порешали: срок вырос на ${result.hours} часов.`;showToast(message,'done');});
 $('#financeButton').addEventListener('click',()=>{renderFinanceBook();refs.finance.classList.add('visible');});
 $('#docsButton').addEventListener('click',()=>{renderDocsBook();refs.docs.classList.add('visible');});
 function saveAndOpenMenu(){state.paused=true;saved=state;persistGame();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');renderMainMenu();refs.menu.classList.add('visible');showToast('Объект сохранён и поставлен на управленческую паузу.','done');}
@@ -2011,6 +2219,7 @@ $('#endDayButton').addEventListener('click',()=>{if(!state.started||state.comple
 $('#soundToggle').addEventListener('click',()=>{audioEnabled=!audioEnabled;$('#soundToggle').textContent=audioEnabled?'♪':'×';$('#soundToggle').title=audioEnabled?'Звук включён':'Звук выключен';if(audioEnabled)playSound('click');});
 $('#skipTutorial').addEventListener('click',()=>{if(state.tutorial){state.tutorial.active=false;state.tutorial.completed=true;}renderTutorial();persistGame();showToast('Обучение пропущено. События снова имеют доступ к объекту.','risk');});
 $('#developHqButton').addEventListener('click',()=>{const outcome=developHeadquarters(state);if(!outcome.ok){showToast('На офис для себя снова не хватило денег. Символично.','risk');return;}feedback(outcome.success?'done':'risk');renderMainMenu();persistGame();showToast(outcome.success?`Собственный офис улучшен: ${outcome.title}.`:`Потрачено ${money(outcome.cost)}. ${outcome.lastFailure}`,outcome.success?'done':'risk');});
+$('#designOfficeButton').addEventListener('click',()=>{const outcome=toggleInHouseDesign(state);if(!outcome.ok){showToast(outcome.reason==='hq-level'?'Сначала нужен штаб уровня 2. Проектировщики отказываются сидеть у принтера.':outcome.reason==='active-project'?'Штат меняют между проектами, а не во время горящего выпуска.':'В кассе нет 240К на постоянный проектный отдел.','risk');return;}renderMainMenu();renderAll();persistGame();feedback(outcome.active?'cash':'message');showToast(outcome.active?'Проектный отдел принят в штат: 12К операционных расходов каждый день, отдельный подрядчик больше не обязателен.':'Проектный отдел распущен. Операционные расходы упали, память организации тоже.','done');});
 document.querySelectorAll('[data-speed]').forEach(button=>button.addEventListener('click',()=>{state.speed=Number(button.dataset.speed);state.paused=false;renderHud();}));
 $('#zoomIn').addEventListener('click',()=>{cameraZoom=Math.min(1.65,cameraZoom+.12);updateCamera();});
 $('#zoomOut').addEventListener('click',()=>{cameraZoom=Math.max(.72,cameraZoom-.12);updateCamera();});

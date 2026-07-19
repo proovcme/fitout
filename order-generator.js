@@ -75,44 +75,41 @@ export function makeSeededRng(seed = 1) {
   };
 }
 
-function workTitles(type) {
-  if (type === 'greenfield') return [
-    'Инженерные изыскания и разбивка осей', 'Рабочий проект и разрешения', 'Мобилизация и временный городок', 'Внешние сети и электроснабжение',
-    'Каркас, кровля и ограждающие конструкции', 'Фасад и внутренняя отделка', 'Инженерия, мебель и рабочие места',
-    'Пусконаладка и генеральная уборка', 'Исполнительные схемы и акты', 'Ввод и итоговая приёмка',
-  ];
-  if (type === 'shell') return [
-    'Обмеры бетонной коробки', 'Рабочий проект fit-out', 'Логистика материалов и подъём', 'Черновая инженерия', 'Перегородки и подготовка оснований',
-    'Чистовая отделка', 'Мебель, свет и оборудование', 'Финишный клининг', 'Исполнительная документация', 'Комплексная приёмка',
-  ];
-  if (type === 'refresh' || type === 'restack') return [
-    'Зафиксировать людей, мебель и реальность', 'Проект этапности и временных зон', 'Поэтапно освободить рабочие зоны', 'Перенести розетки и слаботочку',
-    'Локально подготовить стены', 'Обновить отделку', 'Пересобрать рабочие места', 'Убрать следы вмешательства', 'Закрыть акты и схемы', 'Сдать зоны заказчику',
-  ];
-  return [
-    'Обследование существующего офиса', 'Рабочий проект ремонта', 'Демонтаж и вывоз', 'Новые инженерные сети', 'Перегородки и подготовка',
-    'Чистовая отделка', 'Мебель и оборудование', 'Финишный клининг', 'Исполнительная документация', 'Приёмка и дефектовка',
-  ];
+const INTERVENTION_SCOPES=['electrical','hvac','lowcurrent','fire','plumbing','finishes','furniture','layout'];
+
+function idsForOrder(order){
+  if(order.tutorial)return new Set(['survey','project','protection','temporary-networks','move','demo-equipment','electric','wall-finish','lighting','desks','clean','executive-docs','inspect']);
+  const scopes=new Set(order.workScopes??(order.projectType==='refresh'?['electrical','lowcurrent','finishes','furniture']:INTERVENTION_SCOPES));
+  const ids=new Set(['survey','project','temporary-networks','clean','executive-docs','inspect']);
+  if(order.projectType!=='shell'&&order.projectType!=='greenfield')ids.add('protection');
+  const add=(...values)=>values.forEach(value=>ids.add(value));
+  if(order.projectType==='greenfield')add('site-camp','layout','foundations','structure','envelope','roof','external-networks','protection','partitions','hvac','electric','lowcurrent','fire','plumbing','wall-finish','floor-finish','ceiling-finish','lighting','desks');
+  else if(order.projectType==='shell')add('protection','partitions','hvac','electric','lowcurrent','fire','plumbing','wall-finish','floor-finish','ceiling-finish','lighting','desks');
+  else if(order.projectType==='renovation')add('move','demo-partitions','demo-equipment','demo-floor','demo-ceiling','partitions','hvac','electric','lowcurrent','fire','plumbing','wall-finish','floor-finish','ceiling-finish','lighting','desks');
+  else {
+    if(scopes.has('layout')||scopes.has('furniture')||scopes.has('finishes'))add('move');
+    if(scopes.has('layout'))add('demo-partitions','partitions');
+    if(['electrical','hvac','lowcurrent','fire','plumbing'].some(scope=>scopes.has(scope)))add('demo-equipment','wall-finish');
+    if(scopes.has('electrical'))add('electric','lighting');
+    if(scopes.has('hvac'))add('hvac','demo-ceiling','ceiling-finish');
+    if(scopes.has('lowcurrent'))add('lowcurrent');
+    if(scopes.has('fire'))add('fire','demo-ceiling','ceiling-finish');
+    if(scopes.has('plumbing'))add('plumbing','demo-floor','floor-finish');
+    if(scopes.has('finishes'))add('demo-floor','demo-ceiling','wall-finish','floor-finish','ceiling-finish');
+    if(scopes.has('furniture'))add('desks');
+  }
+  return ids;
 }
 
 export function buildTasksForOrder(order) {
-  const ids = ['survey','project','move','electric','prep','paint','desks','clean','executive-docs','inspect'];
-  const skills = ['management','design','moving','electric','paint','paint','furniture','cleaning','documentation','management'];
-  const positions = [[1,5],[2,3],[3,4],[6,2],[2,1],[1,1],[5,4],[7,5],[6,5],[4,2]];
-  const colors = ['#b7c7b8','#a58ae1','#e9ad52','#69bfe8','#d48f72','#d87561','#9d85d8','#62cba0','#69daa9','#ddff55'];
-  const deps = [[],['survey'],['survey'],['project'],['move','project'],['prep'],['move','electric'],['paint','desks'],['electric','paint','desks'],['clean','executive-docs']];
-  const weights = [.05,.07,.1,.13,.13,.14,.16,.06,.09,.07];
-  const titles = workTitles(order.projectType);
-  return ids.map((id, index) => ({
-    id,
-    title: titles[index],
-    short: titles[index].split(' ').slice(0, 2).join(' '),
-    skill: skills[index], x: positions[index][0], y: positions[index][1],
-    duration: Math.max(3, Math.round(order.deadlineHours * weights[index] * (.72 + order.complexity * .07))),
-    cost: Math.max(10, Math.round(order.budget * weights[index] * .56)),
-    quality: index === 7 ? 5 : Math.max(1, Math.round(1 + order.finishQuality / 24 * weights[index] * 5)),
-    deps: deps[index], priority: index < 1 ? 3 : index < 6 ? 2 : 1, color: colors[index],
-    progress: 0, status: 'locked', crewId: null, committed: false, enabledToday: false,
+  const selected=idsForOrder(order);const works=WORK_CATALOG.filter(work=>selected.has(work.id));const totalWeight=works.reduce((sum,work)=>sum+work.costWeight,0);const areaFactor=clamp(Math.sqrt((order.area??500)/500),.58,2.15);const complexityFactor=.78+(order.complexity??2)*.075;
+  return works.map((work,index)=>({
+    ...work,
+    duration:Math.max(2,Math.min(Math.round((order.deadlineHours??96)*.22),Math.round(work.baseDuration*areaFactor*complexityFactor))),
+    cost:Math.max(6,Math.round((order.budget??900)*.58*work.costWeight/totalWeight)),
+    deps:work.after.filter(id=>selected.has(id)),
+    priority:work.category==='design'?3:['handover','finish'].includes(work.category)?1:2,
+    progress:0,status:'locked',crewId:null,committed:false,enabledToday:false,scheduleOrder:index,
   }));
 }
 
@@ -121,6 +118,7 @@ const CAMPAIGN_SPECS = [
     id:'campaign-tutorial', tutorial:true, requiresProjects:0, chapter:1,
     title:'Переговорная к понедельнику', clientName:'ООО «Первые вводные»', clientPerson:'Анна Крылова', clientRole:'генеральный директор', clientType:'commercial',
     projectType:'refresh', projectTypeLabel:'Учебный ремонт без выселения', area:180, finishClass:'B', finishClassId:'b', finishQuality:76,
+    workScopes:['electrical','lowcurrent','finishes','furniture'],
     complexity:1, budget:760, deadlineHours:72, qualityTarget:74, location:'Москва, Басманный', mapX:28, mapY:36, color:'#ddff55',
     riskTags:['первая миссия: события отключены, пока вы осваиваете управление','заказчик уже выбрал цвет, но это не считается гарантией'], procurement:'прямой договор и одна честная смета', visualSeed:5005,
   },
@@ -128,6 +126,7 @@ const CAMPAIGN_SPECS = [
     id:'campaign-floor', requiresProjects:1, chapter:2,
     title:'Этаж для компании, которая выросла быстрее проекта', clientName:'АО «Север Софт»', clientPerson:'Игорь Ланской', clientRole:'операционный директор', clientType:'commercial',
     projectType:'renovation', projectTypeLabel:'Капитальный ремонт', area:620, finishClass:'A', finishClassId:'a', finishQuality:82,
+    workScopes:[...INTERVENTION_SCOPES],
     complexity:2, budget:1580, deadlineHours:118, qualityTarget:81, location:'Москва, Павелецкая', mapX:47, mapY:30, color:'#a58ae1',
     riskTags:['заказчик помнит, как вы сдали первую переговорную','сотрудники продолжают работать внутри будущего объекта'], procurement:'рамочный договор после учебного успеха', visualSeed:5017,
   },
@@ -135,6 +134,7 @@ const CAMPAIGN_SPECS = [
     id:'campaign-hq', requiresProjects:2, chapter:3,
     title:'Штаб-квартира с бетоном и амбициями', clientName:'«Параллель Банк»', clientPerson:'Олег Марков', clientRole:'директор по развитию', clientType:'commercial',
     projectType:'shell', projectTypeLabel:'Fit-out в shell & core', area:1180, finishClass:'A+', finishClassId:'aplus', finishQuality:88,
+    workScopes:[...INTERVENTION_SCOPES],
     complexity:4, budget:3520, deadlineHours:188, qualityTarget:88, location:'Москва, Сити', mapX:64, mapY:42, color:'#69bfe8',
     riskTags:['этот заказчик пришёл по рекомендации предыдущего','итальянская мебель пока существует только в презентации'], procurement:'закрытый тендер, открытые нервы', visualSeed:5033,
   },
@@ -142,6 +142,7 @@ const CAMPAIGN_SPECS = [
     id:'campaign-ministry', requiresProjects:3, chapter:4,
     title:'Дирекция понятных процедур на чистом поле', clientName:'Министерство понятных процедур', clientPerson:'Валерий Петрович', clientRole:'заместитель директора департамента', clientType:'state',
     projectType:'greenfield', projectTypeLabel:'Стройка с чистого поля', area:2240, finishClass:'B', finishClassId:'b', finishQuality:76,
+    workScopes:[...INTERVENTION_SCOPES],
     complexity:5, budget:5980, deadlineHours:286, qualityTarget:80, location:'Нижний Новгород, Стрелка', mapX:76, mapY:57, color:'#d87561',
     riskTags:['квалификацию дали три предыдущих объекта','решение считается принятым после регистрации решения о регистрации'], procurement:'44-ФЗ и двенадцать печатей', visualSeed:5051,
   },
@@ -171,11 +172,14 @@ export function generateOrders(rng = Math.random, count = 7) {
     const slot=MAP_SLOTS[index%MAP_SLOTS.length];
     const jitterX = (rng() - .5) * 4;
     const jitterY = (rng() - .5) * 4;
+    const scopeCount=type.id==='refresh'?2+Math.floor(rng()*4):type.id==='restack'?4+Math.floor(rng()*3):INTERVENTION_SCOPES.length;
+    const scopeOffset=Math.floor(rng()*INTERVENTION_SCOPES.length);const workScopes=type.id==='refresh'||type.id==='restack'?Array.from({length:scopeCount},(_,scopeIndex)=>INTERVENTION_SCOPES[(scopeOffset+scopeIndex)%INTERVENTION_SCOPES.length]):[...INTERVENTION_SCOPES];
     const order = {
       id: `order-${index + 1}-${Math.floor(rng() * 9999).toString(36)}`,
       title: pick(TITLES[type.id], rng),
       clientName, clientPerson, clientRole, clientType,
       projectType: type.id, projectTypeLabel: type.label,
+      workScopes,
       area, finishClass: finish.label, finishClassId: finish.id, finishQuality: finish.quality,
       complexity, budget, deadlineHours,
       qualityTarget: clamp(finish.quality + complexity - (clientType === 'state' ? 1 : 0), 68, 94),
@@ -191,3 +195,4 @@ export function generateOrders(rng = Math.random, count = 7) {
   }
   return orders;
 }
+import { WORK_CATALOG } from './work-catalog.js';

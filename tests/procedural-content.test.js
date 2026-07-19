@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { generateOrders, makeSeededRng } from '../order-generator.js';
 import { createPersonProfile, createVisualProfile, generateAmbientBeat, generateSiteLine } from '../procedural-content.js';
 import { GAME_HOURS_PER_REAL_SECOND, REAL_SECONDS_PER_WORKDAY, createInitialState, ensureMasterSchedule, scheduledTasksForDay, shiftMasterScheduleTask, updateAmbientActivity } from '../game-core.js';
 import { allRandomEvents } from '../events/index.js';
+import { WORK_CATALOG } from '../work-catalog.js';
 
 test('order market is deterministic and guarantees broad project variety', () => {
   const first=generateOrders(makeSeededRng(42),10);
@@ -13,7 +15,9 @@ test('order market is deterministic and guarantees broad project variety', () =>
   assert.ok(first.some(order=>order.clientType==='state'));
   assert.ok(first.some(order=>order.clientType==='commercial'));
   assert.ok(new Set(first.map(order=>order.finishClass)).size>=3);
-  for(const order of first){assert.equal(order.tasks.length,10);assert.ok(order.tasks.some(task=>task.id==='project'));assert.ok(order.tasks.some(task=>task.id==='executive-docs'));assert.ok(order.budget>0);assert.ok(order.deadlineHours>0);}
+  for(const order of first){assert.ok(order.tasks.length>=10);assert.ok(order.tasks.some(task=>task.id==='project'));assert.ok(order.tasks.some(task=>task.id==='executive-docs'));assert.ok(order.tasks.some(task=>task.id==='clean'));assert.ok(order.budget>0);assert.ok(order.deadlineHours>0);}
+  const greenfield=first.find(order=>order.projectType==='greenfield');assert.ok(['site-camp','layout','foundations','structure','envelope','roof','external-networks'].every(id=>greenfield.tasks.some(task=>task.id===id)));
+  assert.ok(WORK_CATALOG.length>=28);assert.ok(WORK_CATALOG.some(work=>work.optional&&work.id==='protection'));
 });
 
 test('procedural asset profiles vary offices and recognizable people', () => {
@@ -46,6 +50,14 @@ test('ambient activity is contextual, finite and separate from major incidents',
   state.elapsed=beat.expiresAt+.01;
   state.nextAmbientBeatAt=state.elapsed+1;
   assert.equal(updateAmbientActivity(state),null);
+});
+
+test('the 3D office has explicit demolition, partition, engineering and furniture states',()=>{
+  const source=readFileSync(new URL('../game.js',import.meta.url),'utf8');
+  assert.match(source,/sceneProps\.legacyInterior\.visible=siteType==='existing'&&demolitionProgress<\.999/);
+  assert.match(source,/const partitionProgress=prepProgress/);
+  assert.match(source,/const engineeringProgress=averageProgress/);
+  assert.match(source,/const fitoutReady=furnitureProgress>\.02/);
 });
 
 test('a mission samples many incidents and spreads them across workdays', () => {

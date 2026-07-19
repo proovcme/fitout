@@ -21,6 +21,7 @@ const DEFAULT_ORGANIZATION = {
   reputation:50,
   projectsCompleted:0,
   totalProfit:0,
+  inHouseDesign:false,
   history:[],
 };
 
@@ -142,6 +143,13 @@ export function developHeadquarters(state, rng = Math.random) {
   return {ok:true,success,cost,...state.hq};
 }
 
+export function toggleInHouseDesign(state){
+  const organization=ensureOrganization(state);const activeProject=Boolean(state.selectedOrder)&&state.started&&!state.completed;
+  if(activeProject)return {ok:false,reason:'active-project'};
+  if(!organization.inHouseDesign){const cost=240;if((state.hq?.level??0)<2)return {ok:false,reason:'hq-level',cost};if(organization.cash<cost)return {ok:false,reason:'cash',cost};organization.cash-=cost;organization.inHouseDesign=true;organization.history.unshift({type:'staff',role:'design',amount:cost,active:true,at:Date.now()});ensureRuntimeCrews(state);return {ok:true,active:true,cost,dailyCost:12};}
+  organization.inHouseDesign=false;state.crews=state.crews.filter(crew=>crew.id!=='inhouse-design');organization.history.unshift({type:'staff',role:'design',amount:0,active:false,at:Date.now()});return {ok:true,active:false,cost:0,dailyCost:0};
+}
+
 export const TASK_BLUEPRINTS = [
   { id: 'survey', title: 'Зафиксировать состояние', short: 'Обход', skill: 'management', x: 1, y: 5, duration: 4, cost: 18, quality: 1, deps: [], priority: 3, color: '#b7c7b8' },
   { id: 'project', title: 'Выпустить рабочий проект', short: 'Проект', skill: 'design', x: 2, y: 3, duration: 12, cost: 72, quality: 5, deps: ['survey'], priority: 3, color: '#a58ae1' },
@@ -156,19 +164,23 @@ export const TASK_BLUEPRINTS = [
 ];
 
 export const CONTRACTOR_BLUEPRINTS = [
-  { id: 'movers', name: 'Перестановка', company: 'Точно Переедем', skill: 'moving', price: 42, rating: 86, speed: 1.15, quality: 0.97, color: '#e9ad52', initials: 'ТП', quirk: 'Теряют только мелкое' },
-  { id: 'painters', name: 'Маляры', company: 'Ровный слой', skill: 'paint', price: 68, rating: 92, speed: 1.05, quality: 1.06, color: '#d87561', initials: 'РС', quirk: 'RAL помнят на глаз' },
-  { id: 'electricians', name: 'Электрики', company: 'Фаза Ноль', skill: 'electric', price: 54, rating: 89, speed: 1.08, quality: 1.02, color: '#69bfe8', initials: 'ФН', quirk: 'Им всегда нужен доступ' },
-  { id: 'assemblers', name: 'Сборщики', company: 'Модуль Бюро', skill: 'furniture', price: 76, rating: 84, speed: 1.18, quality: 0.98, color: '#9d85d8', initials: 'МБ', quirk: 'Инструкция — слабость' },
-  { id: 'cleaners', name: 'Клининг', company: 'Чистый лист', skill: 'cleaning', price: 34, rating: 90, speed: 1.12, quality: 1.04, color: '#62cba0', initials: 'ЧЛ', quirk: 'На сдаче незаменимы' },
+  { id: 'designers', name: 'Проектировщики', company: 'Линия допуска', skill: 'design', manpower:2, price: 82, rating: 88, speed: 1.03, quality: 1.08, color: '#a58ae1', initials: 'ЛД', quirk: 'Каждый лист имеет собственное мнение' },
+  { id: 'demolition', name: 'Демонтаж', company: 'Ничего лишнего', skill: 'demolition', manpower:7, price: 72, rating: 82, speed: 1.17, quality: .94, color: '#cf765f', initials: 'НЛ', quirk: 'Лишнее определяют после демонтажа' },
+  { id: 'builders', name: 'Общестрой', company: 'Контур плюс', skill: 'construction', manpower:7, price: 96, rating: 87, speed: 1.02, quality: 1.03, color: '#b6976c', initials: 'КП', quirk: 'Уровень есть. Иногда даже строительный' },
+  { id: 'engineers', name: 'Инженерные сети', company: 'Труба и данные', skill: 'engineering', manpower:5, price: 94, rating: 89, speed: 1.04, quality: 1.06, color: '#5aaecf', initials: 'ТД', quirk: 'Все сети хотят пройти в одном лотке' },
+  { id: 'movers', name: 'Перестановка', company: 'Точно Переедем', skill: 'moving', manpower:5, price: 42, rating: 86, speed: 1.15, quality: 0.97, color: '#e9ad52', initials: 'ТП', quirk: 'Теряют только мелкое' },
+  { id: 'painters', name: 'Маляры', company: 'Ровный слой', skill: 'paint', manpower:4, price: 68, rating: 92, speed: 1.05, quality: 1.06, color: '#d87561', initials: 'РС', quirk: 'RAL помнят на глаз' },
+  { id: 'electricians', name: 'Электрики', company: 'Фаза Ноль', skill: 'electric', manpower:3, price: 54, rating: 89, speed: 1.08, quality: 1.02, color: '#69bfe8', initials: 'ФН', quirk: 'Им всегда нужен доступ' },
+  { id: 'assemblers', name: 'Сборщики', company: 'Модуль Бюро', skill: 'furniture', manpower:6, price: 76, rating: 84, speed: 1.18, quality: 0.98, color: '#9d85d8', initials: 'МБ', quirk: 'Инструкция — слабость' },
+  { id: 'cleaners', name: 'Клининг', company: 'Чистый лист', skill: 'cleaning', manpower:5, price: 34, rating: 90, speed: 1.12, quality: 1.04, color: '#62cba0', initials: 'ЧЛ', quirk: 'На сдаче незаменимы' },
 ];
 
 const CONTRACTOR_CLASSES={
-  economy:{label:'ЭКОНОМ',price:.68,speed:.82,quality:.88,rating:-14,suffix:' Лайт',color:'#e7a446'},
-  standard:{label:'СТАНДАРТ',price:1,speed:1,quality:1,rating:0,suffix:'',color:null},
-  premium:{label:'ПРЕМИУМ',price:1.72,speed:1.22,quality:1.12,rating:7,suffix:' Профи',color:'#5fc5dd'},
-  rush:{label:'ШТУРМ',price:1.34,speed:1.38,quality:.93,rating:-3,suffix:' 24/7',color:'#f06e5f'},
-  craft:{label:'ПЕДАНТЫ',price:1.46,speed:.84,quality:1.2,rating:5,suffix:' ГОСТ',color:'#8e78d8'},
+  economy:{label:'ЭКОНОМ',price:.68,speed:.82,quality:.88,rating:-14,manpower:2,suffix:' Лайт',color:'#e7a446'},
+  standard:{label:'СТАНДАРТ',price:1,speed:1,quality:1,rating:0,manpower:0,suffix:'',color:null},
+  premium:{label:'ПРЕМИУМ',price:1.72,speed:1.22,quality:1.12,rating:7,manpower:-1,suffix:' Профи',color:'#5fc5dd'},
+  rush:{label:'ШТУРМ',price:1.34,speed:1.38,quality:.93,rating:-3,manpower:3,suffix:' 24/7',color:'#f06e5f'},
+  craft:{label:'ПЕДАНТЫ',price:1.46,speed:.84,quality:1.2,rating:5,manpower:-1,suffix:' ГОСТ',color:'#8e78d8'},
 };
 const CONTRACTOR_QUIRKS={economy:['Смета на салфетке, зато сразу','Инструмент общий, мнение у каждого своё','Обещают выйти всем составом. Состав не назван'],standard:['Знают, где лежит журнал работ','Спорят только после аванса','Приезжают на этот адрес со второй попытки'],premium:['Просят BIM, даже когда нужна кисть','Присылают отчёт раньше вопроса','У них есть менеджер по менеджеру'],rush:['Работают быстро, акты догоняют','Ночная смена считает себя дневной','Перфоратор заряжен, план уточняется'],craft:['Меряют дважды, потом ещё раз','Не подпишут узел, который им не нравится','Знают ГОСТ по номеру и по настроению']};
 
@@ -181,6 +193,7 @@ export function createContractorMarket() {
     rating:Math.max(55,Math.min(99,base.rating+tuning.rating)),
     speed:base.speed*tuning.speed,
     quality:base.quality*tuning.quality,
+    manpower:Math.max(2,base.manpower+tuning.manpower),
     color:tuning.color??base.color,
     contractClass,classLabel:tuning.label,quirk:CONTRACTOR_QUIRKS[contractClass][(baseIndex+classIndex)%CONTRACTOR_QUIRKS[contractClass].length],
     hired:false,
@@ -198,9 +211,16 @@ export function ensureWorkforceMarket(state) {
 export function ensureRuntimeCrews(state){
   state.crews??=[];
   if(!state.crews.some(crew=>crew.id==='foreman'))state.crews.unshift({id:'foreman',name:'Вы',role:'Технический заказчик',skill:'management',color:'#ddff55',initials:'ТЗ',speed:.7,quality:.92,taskId:null,x:4,y:6,state:'idle'});
-  if(!state.crews.some(crew=>crew.id==='general-crew'))state.crews.push({id:'general-crew',name:'Хозбригада «Сами справимся»',role:'Универсальная штатная бригада',skill:'general',color:'#9aa89d',initials:'ХБ',speed:.52,quality:.78,taskId:null,x:7,y:7,state:'idle',level:1});
+  const player=state.crews.find(crew=>crew.id==='foreman');Object.assign(player,{name:'Вы',role:'Технический заказчик',skill:'management',initials:'ТЗ',speed:.7,quality:.92});
+  if(!state.crews.some(crew=>crew.id==='general-crew'))state.crews.push({id:'general-crew',name:'Хозбригада «Сами справимся»',role:'Универсальная штатная бригада',skill:'general',color:'#9aa89d',initials:'ХБ',speed:.52,quality:.78,manpower:4,taskId:null,x:7,y:7,state:'idle',level:1});
+  else state.crews.find(crew=>crew.id==='general-crew').manpower??=4;
+  for(const member of state.team??[])if(member.hired&&!state.crews.some(crew=>crew.id===`team-${member.id}`))state.crews.push(makeTeamRuntimeCrew(member));
+  if(ensureOrganization(state).inHouseDesign&&!state.crews.some(crew=>crew.id==='inhouse-design'))state.crews.push({id:'inhouse-design',name:'Проектный отдел организации',role:'Штатные проектировщики',skill:'design',color:'#a58ae1',initials:'ПО',speed:1.08,quality:1.1,manpower:3,baseManpower:3,taskId:null,x:2,y:3,state:'idle',level:2});
   state.playerAvatar??={color:'#ddff55',outfit:'vest',helmet:'classic'};
   state.playerZoneTaskId??=null;
+  state.siteDirt=THREELESS_CLAMP(Number(state.siteDirt??0),0,100);
+  state.magicResolve??={lastAt:-1e9,attempts:0};
+  if(!Number.isFinite(state.magicResolve.lastAt))state.magicResolve.lastAt=-1e9;
   return state;
 }
 
@@ -211,6 +231,11 @@ export const TEAM_BLUEPRINTS = [
   { id:'designer',name:'Мария Корнилова',role:'Главный архитектор',price:88,effect:'Выпускает рабочий проект и защищает решения',initials:'МК',color:'#a58ae1',skill:'design' },
   { id:'doc-control',name:'Семён Актов',role:'Специалист ИД',price:64,effect:'Собирает акты, схемы и паспорта до приёмки',initials:'СА',color:'#69daa9',skill:'documentation' },
 ];
+
+function makeTeamRuntimeCrew(member){
+  const level=Math.max(1,Math.min(5,member.level??1));const specialist=Boolean(member.skill);
+  return {id:`team-${member.id}`,name:member.name,role:member.role,skill:member.skill??'support',color:member.color,initials:member.initials,speed:specialist?1.02+(level-1)*.035:1,quality:specialist?1.08+(level-1)*.025:1.04,taskId:null,x:specialist?8:7,y:specialist?7:6,state:specialist?'idle':'patrol',level,...(!specialist?{supportRole:member.id}:{})};
+}
 
 const RANDOM_EVENTS = ['noise', 'nephew', 'delivery', 'calendar', 'client-ghost', 'italian-sofa'];
 
@@ -275,7 +300,7 @@ export function shiftMasterScheduleTask(state,taskId,dayDelta) {
 
 export function scheduledTasksForDay(state,dayIndex) {
   ensureMasterSchedule(state);
-  return state.tasks.filter(task=>!['done','active','awaiting'].includes(task.status)&&task.plannedStartDay<=dayIndex).sort((a,b)=>a.scheduleOrder-b.scheduleOrder);
+  return state.tasks.filter(task=>!['done','skipped','active','awaiting'].includes(task.status)&&task.plannedStartDay<=dayIndex).sort((a,b)=>a.scheduleOrder-b.scheduleOrder);
 }
 
 export function captureMasterSchedule(state) {
@@ -353,7 +378,7 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     finance:{ledger:[{hour:0,type:'income',category:'Аванс',amount:INITIAL_BUDGET,text:'Стартовое финансирование'}],contractValue:INITIAL_BUDGET,received:INITIAL_BUDGET,spent:0},
     crews: [
       { id: 'foreman', name: 'Вы', role: 'Технический заказчик', skill: 'management', color: '#ddff55', initials: 'ТЗ', speed: .7, quality: .92, taskId: null, x: 4, y: 6, state: 'idle' },
-      { id: 'general-crew', name: 'Хозбригада «Сами справимся»', role: 'Универсальная штатная бригада', skill: 'general', color: '#9aa89d', initials: 'ХБ', speed: .52, quality: .78, taskId: null, x: 7, y: 7, state: 'idle',level:1 },
+      { id: 'general-crew', name: 'Хозбригада «Сами справимся»', role: 'Универсальная штатная бригада', skill: 'general', color: '#9aa89d', initials: 'ХБ', speed: .52, quality: .78, manpower:4, taskId: null, x: 7, y: 7, state: 'idle',level:1 },
     ],
     plannedDay: 0,
     needsPlanning: false,
@@ -384,6 +409,8 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     },
     playerAvatar:{color:'#ddff55',outfit:'vest',helmet:'classic'},
     playerZoneTaskId:null,
+    siteDirt:0,
+    magicResolve:{lastAt:-1e9,attempts:0},
     tutorial:null,
     organization:{...DEFAULT_ORGANIZATION,history:[],loans:[],staffXp:{},contractorXp:{}},
     log: [],
@@ -395,6 +422,7 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
 export function selectOrder(state, order) {
   if (!order || state.started) return false;
   const organization=ensureOrganization(state);
+  ensureRuntimeCrews(state);
   if((order.requiresProjects??0)>organization.projectsCompleted)return false;
   if((order.requiredLevel??1)>organization.playerLevel)return false;
   const mobilizationCost=Math.max(12,Math.min(140,Math.round(order.area/28+order.complexity*8)));
@@ -431,10 +459,10 @@ export function selectOrder(state, order) {
 
 export function unlockTasks(state) {
   for (const task of state.tasks) {
-    if (task.status === 'done' || task.status === 'active' || task.status === 'blocked' || task.status === 'awaiting') continue;
+    if (task.status === 'done' || task.status === 'skipped' || task.status === 'active' || task.status === 'blocked' || task.status === 'awaiting') continue;
     if(!state.started){task.status=task.id==='survey'?'ready':'locked';continue;}
     if(task.id==='inspect') {
-      task.status=state.tasks.filter(item=>item.id!=='inspect').every(item=>item.status==='done')?'ready':'locked';
+      task.status=state.tasks.filter(item=>item.id!=='inspect').every(item=>['done','skipped'].includes(item.status))?'ready':'locked';
     } else task.status='ready';
   }
 }
@@ -517,9 +545,10 @@ export function updateAmbientActivity(state){
 export function closeDayFinances(state) {
   const teamCost=Math.round((state.team??[]).filter(member=>member.hired).reduce((sum,member)=>sum+member.price*.055,0));
   const contractorCost=Math.round((state.contractors??[]).filter(item=>item.hired).reduce((sum,item)=>sum+item.price*.08,0));
+  const permanentCost=ensureOrganization(state).inHouseDesign?12:0;
   const overhead=Math.max(6,Math.round((state.selectedOrder?.area??280)/180));
-  const total=teamCost+contractorCost+overhead;state.budget-=total;
-  recordCash(state,'expense','День объекта',total,`Зарплаты ${teamCost}К · подрядчики ${contractorCost}К · накладные ${overhead}К`);
+  const total=teamCost+contractorCost+permanentCost+overhead;state.budget-=total;
+  recordCash(state,'expense','День объекта',total,`Зарплаты ${teamCost}К · подрядчики ${contractorCost}К · постоянный штат ${permanentCost}К · накладные ${overhead}К`);
   return total;
 }
 
@@ -528,12 +557,8 @@ export function hireTeamMember(state,memberId) {
   const payment=spendProjectAndCompany(state,member.price);if(!payment.ok)return payment;
   member.hired=true;member.payment=payment;
   recordCash(state,'expense','Команда',member.price,`Мобилизация: ${member.name}`);
-  if(member.id==='pm') {
-    const foreman=state.crews.find(crew=>crew.id==='foreman');foreman.name=member.name;foreman.role=member.role;foreman.initials=member.initials;foreman.speed=1.15;foreman.quality=1.02;
-  }
   const level=Math.max(1,member.level??(1+Math.floor((ensureOrganization(state).staffXp[member.id]??0)/2)));member.level=Math.min(5,level);
-  if(member.skill)state.crews.push({id:`team-${member.id}`,name:member.name,role:member.role,skill:member.skill,color:member.color,initials:member.initials,speed:1.02+(member.level-1)*.035,quality:1.08+(member.level-1)*.025,taskId:null,x:8,y:7,state:'idle',level:member.level});
-  else if(member.id!=='pm')state.crews.push({id:`team-${member.id}`,name:member.name,role:member.role,skill:'support',color:member.color,initials:member.initials,speed:1,quality:1.04,taskId:null,x:7,y:6,state:'patrol',supportRole:member.id});
+  state.crews.push(makeTeamRuntimeCrew(member));
   return {ok:true,member};
 }
 
@@ -555,6 +580,8 @@ export function hireContractor(state, contractorId) {
     speed: contractor.speed*(1+(contractor.level-1)*.025),
     quality: contractor.quality*(1+(contractor.level-1)*.018),
     quirk: contractor.quirk,
+    manpower:contractor.manpower,
+    baseManpower:contractor.manpower,
     taskId: null,
     x: 8,
     y: 7,
@@ -566,11 +593,29 @@ export function hireContractor(state, contractorId) {
   return { ok: true, contractor, arrivalAt };
 }
 
+export function adjustContractorManpower(state,contractorId,delta){
+  const contractor=state.contractors.find(item=>item.id===contractorId);const crew=state.crews.find(item=>item.id===`crew-${contractorId}`);
+  if(!contractor?.hired||!crew||![-1,1].includes(delta))return {ok:false,reason:'contractor'};
+  crew.manpower??=contractor.manpower??3;crew.baseManpower??=crew.manpower;contractor.manpower??=crew.manpower;
+  if(delta>0){
+    if(contractor.manpower>=12)return {ok:false,reason:'max'};const cost=Math.max(6,Math.round(contractor.price/Math.max(2,contractor.manpower)*.65));const payment=spendProjectAndCompany(state,cost);if(!payment.ok)return payment;
+    contractor.manpower+=1;recordCash(state,'expense','Усиление бригады',cost,`${contractor.company}: +1 человек`);
+    if(state.started){crew.pendingManpower=(crew.pendingManpower??0)+1;crew.reinforcementAt=(Math.floor(state.elapsed/24)+1)*24;state.log.push({type:'hire',text:`${contractor.company}: усиление +1 выйдет завтра`});return {ok:true,delta,cost,pending:true,arrivalAt:crew.reinforcementAt,contractor,crew};}
+    crew.manpower+=1;return {ok:true,delta,cost,pending:false,contractor,crew};
+  }
+  if(contractor.manpower<=2)return {ok:false,reason:'min'};contractor.manpower-=1;
+  if((crew.pendingManpower??0)>0)crew.pendingManpower-=1;else crew.manpower=Math.max(2,crew.manpower-1);
+  state.log.push({type:'risk',text:`${contractor.company}: один человек снят с объекта`});return {ok:true,delta,cost:0,pending:false,contractor,crew};
+}
+
+function activatePendingManpower(state){
+  for(const crew of state.crews??[]){if((crew.pendingManpower??0)>0&&state.elapsed>=(crew.reinforcementAt??Infinity)){const added=crew.pendingManpower;crew.manpower=(crew.manpower??0)+added;crew.pendingManpower=0;crew.reinforcementAt=null;state.log.push({type:'hire',text:`${crew.name}: усиление ${added} чел. вышло на объект`});}}
+}
+
 export function unhireTeamMember(state,memberId) {
   const member=state.team.find(item=>item.id===memberId);if(!member?.hired||state.started)return {ok:false,reason:'locked'};
   member.hired=false;refundProjectAndCompany(state,member.payment);member.payment=null;
   state.crews=state.crews.filter(crew=>crew.id!==`team-${member.id}`);
-  if(member.id==='pm'){const foreman=state.crews.find(crew=>crew.id==='foreman');Object.assign(foreman,{name:'Вы',role:'Технический заказчик',initials:'ТЗ',speed:.7,quality:.92});}
   return {ok:true,member};
 }
 
@@ -637,10 +682,16 @@ export function cyclePriority(state, taskId) {
   return true;
 }
 
+export function skipOptionalTask(state,taskId){
+  const task=state.tasks.find(item=>item.id===taskId);if(!task?.optional||!['ready','locked','blocked'].includes(task.status))return {ok:false,reason:'task'};
+  task.status='skipped';task.enabledToday=false;task.crewId=null;const effect=task.skipEffect??{};state.siteDirt=THREELESS_CLAMP((state.siteDirt??0)+(effect.dirt??0),0,100);state.quality=Math.max(0,state.quality+(effect.quality??0));state.skippedTempoFactor=Math.min(state.skippedTempoFactor??1,effect.tempo??1);state.log.push({type:'risk',text:`Сэкономили на «${task.short}». Дешевле сейчас, объяснять потом.`});unlockTasks(state);return {ok:true,task,effect};
+}
+
 function availableTaskForCrew(state, crew) {
   if ((crew.unavailableUntil ?? 0) > state.elapsed) return undefined;
   return state.tasks
     .filter((task) => task.status === 'ready' && (task.skill === crew.skill||crew.skill==='general') && task.enabledToday)
+    .filter(task=>crew.skill!=='general'||!state.crews.some(other=>other.id!==crew.id&&other.skill===task.skill&&!other.taskId&&(other.unavailableUntil??0)<=state.elapsed))
     .filter((task) => !task.crewId)
     .sort((a, b) => state.team?.find(member=>member.id==='pm')?.hired ? b.priority - a.priority || a.duration - b.duration : a.duration-b.duration)[0];
 }
@@ -682,6 +733,49 @@ function assignCrews(state) {
   }
 }
 
+export function calculateSiteCongestion(state){
+  const present=(state.crews??[]).filter(crew=>(crew.unavailableUntil??0)<=state.elapsed);
+  const manpower=present.reduce((sum,crew)=>sum+crewHeadcount(state,crew),0);
+  const capacity=Math.max(10,Math.round((state.selectedOrder?.area??280)/18));const overload=Math.max(0,manpower-capacity);const penalty=THREELESS_CLAMP(1-(overload/capacity)*.1,.68,1);
+  return {manpower,capacity,overload:Math.round(overload*10)/10,penalty};
+}
+
+export function crewHeadcount(state,crew){
+  if(!crew)return 0;if(crew.id==='foreman'||crew.id.startsWith('team-'))return 1;if(crew.id==='general-crew')return crew.manpower??4;
+  if(Number.isFinite(crew.manpower))return crew.manpower;const contractor=state.contractors?.find(item=>`crew-${item.id}`===crew.id);return contractor?.manpower??3;
+}
+
+function THREELESS_CLAMP(value,min,max){return Math.max(min,Math.min(max,value));}
+
+function localCrowdingPenalty(state,task){
+  const neighbors=state.tasks.filter(other=>other.id!==task.id&&other.status==='active'&&Math.hypot((other.x??0)-(task.x??0),(other.y??0)-(task.y??0))<2.15).length;
+  return Math.max(.74,1-neighbors*.075);
+}
+
+const NON_PHYSICAL_TASKS=new Set(['survey','project','executive-docs','inspect']);
+
+export function updateSiteCleanliness(state,deltaHours){
+  const activePhysical=state.tasks.filter(task=>task.status==='active'&&!NON_PHYSICAL_TASKS.has(task.id)&&task.skill!=='cleaning');
+  const availableCrews=(state.crews??[]).filter(crew=>(crew.unavailableUntil??0)<=state.elapsed);
+  const dedicatedCleaners=availableCrews.filter(crew=>crew.skill==='cleaning');
+  const activeCleaning=availableCrews.filter(crew=>{
+    const task=state.tasks.find(item=>item.id===crew.taskId);
+    return task?.status==='active'&&task.skill==='cleaning';
+  });
+  const siteManpower=activePhysical.reduce((sum,task)=>sum+crewHeadcount(state,availableCrews.find(crew=>crew.id===task.crewId)),0);
+  const protectionSkipped=state.tasks.some(task=>task.id==='protection'&&task.status==='skipped');const generated=deltaHours*(activePhysical.length*.72+siteManpower*.075)*(protectionSkipped?1.38:1);
+  const activePower=activeCleaning.reduce((sum,crew)=>sum+Math.max(1.2,crewHeadcount(state,crew)*.9)*Math.max(.7,crew.speed??1),0);
+  const passivePower=dedicatedCleaners.filter(crew=>!crew.taskId).reduce((sum,crew)=>sum+Math.max(.45,crewHeadcount(state,crew)*.18)*Math.max(.7,crew.speed??1),0);
+  const hasCleaningSupport=dedicatedCleaners.length>0||activeCleaning.length>0;
+  const reluctantSelfCleaning=hasCleaningSupport?0:siteManpower*.035;
+  const removed=deltaHours*(activePower*2.4+passivePower+reluctantSelfCleaning);
+  state.siteDirt=THREELESS_CLAMP((state.siteDirt??0)+generated-removed,0,100);
+  const distraction=!hasCleaningSupport&&state.siteDirt>18?THREELESS_CLAMP(1-(state.siteDirt-18)*.003,.76,1):1;
+  if(state.siteDirt>82&&activePhysical.length)state.quality=Math.max(0,state.quality-deltaHours*.025);
+  state.cleanliness={dirt:state.siteDirt,generated,removed,hasCleaningSupport,distraction};
+  return state.cleanliness;
+}
+
 function releaseStagePayment(state,task) {
   if(task.reworkOf||['executive-docs','inspect'].includes(task.id))return 0;
   const contractValue=state.finance?.contractValue??state.contract?.budget??0;
@@ -701,6 +795,7 @@ function completeTask(state, task, crew) {
   crew.state = 'idle';
   crew.x = task.x;
   crew.y = task.y;
+  if(task.skill==='cleaning')state.siteDirt=0;
   const supervision=state.team?.find(member=>member.id==='supervision')?.hired;
   const qualityGain = task.quality * crew.quality * (supervision?1:.82) * (task.profileMismatch?.72:1);
   task.acceptanceQuality=crew.quality;task.acceptanceQualityGain=qualityGain;task.lastCrewLevel=crew.level??1;task.lastCrewId=crew.id;
@@ -710,16 +805,16 @@ function completeTask(state, task, crew) {
     state.tasks.push({id:`rework-${task.id}-${state.tasks.length}`,title:`Уточнить и переделать: ${task.short}`,short:'Переделка без РД',skill:task.skill,x:task.x,y:task.y,duration:Math.max(3,Math.round(task.duration*.38)),cost:Math.max(12,Math.round(task.cost*.3)),quality:1,deps:[],priority:3,color:'#ff746b',progress:0,status:'ready',crewId:null,committed:false,enabledToday:false,reworkOf:task.id});
     state.quality=Math.max(0,state.quality-4);state.log.push({type:'risk',text:`Стройка без финального проекта не прокатила: ${task.short}`});
   }
-  if(task.id==='electric') {
-    const paint=state.tasks.find(item=>item.id==='paint');
-    if(paint?.status==='done'&&!state.tasks.some(item=>item.reworkOf==='paint')) {
-      state.tasks.push({id:`rework-paint-${state.tasks.length}`,title:'Восстановить стены после прокладки кабеля',short:'Переделка',skill:'paint',x:2,y:1,duration:9,cost:96,quality:2,deps:[],priority:2,color:'#ff746b',progress:0,status:'ready',crewId:null,committed:false,enabledToday:false,reworkOf:'paint'});
+  if(['electric','hvac','lowcurrent','fire','plumbing'].includes(task.id)) {
+    const paint=state.tasks.find(item=>['paint','wall-finish'].includes(item.id));
+    if(['done','awaiting'].includes(paint?.status)&&!state.tasks.some(item=>item.reworkOf===paint.id)) {
+      state.tasks.push({id:`rework-paint-${state.tasks.length}`,title:'Восстановить стены после прокладки кабеля',short:'Переделка',skill:'paint',x:2,y:1,duration:9,cost:96,quality:2,deps:[],priority:2,color:'#ff746b',progress:0,status:'ready',crewId:null,committed:false,enabledToday:false,reworkOf:paint.id});
       state.quality=Math.max(0,state.quality-7);state.trust=Math.max(0,state.trust-4);state.log.push({type:'risk',text:'Электрики вскрыли готовые стены. Добавлена переделка.'});
     }
   }
-  if(['paint','desks','electric'].includes(task.id)) {
+  if(['paint','wall-finish','floor-finish','ceiling-finish','desks','electric','lighting','hvac','lowcurrent','fire','plumbing','partitions'].includes(task.id)) {
     const clean=state.tasks.find(item=>item.id==='clean');
-    if(clean?.status==='done'&&!state.tasks.some(item=>item.reworkOf==='clean')) {
+    if(['done','awaiting'].includes(clean?.status)&&!state.tasks.some(item=>item.reworkOf==='clean')) {
       state.tasks.push({id:`rework-clean-${state.tasks.length}`,title:'Повторная уборка после новых работ',short:'Переделка',skill:'cleaning',x:7,y:5,duration:5,cost:34,quality:1,deps:[],priority:1,color:'#ff746b',progress:0,status:'ready',crewId:null,committed:false,enabledToday:false,reworkOf:'clean'});
       state.log.push({type:'risk',text:'Уборку сделали слишком рано. Потребуется повторный выход.'});
     }
@@ -748,6 +843,26 @@ export function submitTaskForAcceptance(state,taskId,rng=Math.random) {
   return {ok:true,accepted:false,chance,remedialCost,remainingHours:4.5};
 }
 
+export function tryMagicResolve(state,rng=Math.random){
+  state.magicResolve??={lastAt:-1e9,attempts:0};
+  const cooldownHours=48;const elapsed=state.elapsed??0;const remaining=Math.max(0,cooldownHours-(elapsed-state.magicResolve.lastAt));
+  if(!state.started)return {ok:false,reason:'not-started',remaining};
+  if(remaining>0)return {ok:false,reason:'cooldown',remaining};
+  state.magicResolve.lastAt=elapsed;state.magicResolve.attempts+=1;
+  const chance=.16;
+  if(rng()>=chance){state.trust=Math.max(0,state.trust-1);state.log.push({type:'risk',text:'«Я в пути!» отправлено. В пути оказался только ответ «принято». Без решения.'});return {ok:true,success:false,chance,cooldownHours};}
+  const outcome=rng();
+  if(outcome<.44){
+    const awaiting=state.tasks.filter(task=>task.status==='awaiting');
+    if(awaiting.length){let payment=0;for(const task of awaiting){task.status='done';state.quality=Math.min(100,state.quality+(task.acceptanceQualityGain??task.quality)*.8);payment+=releaseStagePayment(state,task);}state.trust=Math.min(100,state.trust+2);unlockTasks(state);state.log.push({type:'done',text:`Порешали: закрыто без замечаний ${awaiting.length} работ${payment?`, оплачено ${payment}К`:''}. Никто не задаёт уточняющих вопросов.`});return {ok:true,success:true,outcome:'acceptance',accepted:awaiting.length,payment,chance,cooldownHours};}
+  }
+  if(outcome<.74){
+    const amount=Math.max(35,Math.min(160,Math.round((state.contract?.budget??800)*.07/5)*5));
+    state.finance??={ledger:[],contractValue:state.contract?.budget??0,received:0,spent:0};state.budget+=amount;state.contract.budget+=amount;state.finance.contractValue=(state.finance.contractValue??0)+amount;recordCash(state,'income','Порешали с финансированием',amount,'Дополнительный резерв без удобного объяснения');state.trust=Math.max(0,state.trust-2);state.log.push({type:'done',text:`Порешали: на объект пришло ещё ${amount}К. Назначение платежа лучше не перечитывать.`});return {ok:true,success:true,outcome:'money',amount,chance,cooldownHours};
+  }
+  const hours=12;state.contract.deadlineHours+=hours;state.trust=Math.max(0,state.trust-1);state.log.push({type:'done',text:`Порешали: заказчик дал ещё ${hours} часов и попросил никому не говорить, что он их дал.`});return {ok:true,success:true,outcome:'deadline',hours,chance,cooldownHours};
+}
+
 export function eventRequiredSkill(event) {
   const skills=(event?.options??[]).map(option=>option.scene?.hideSkill).filter(Boolean);
   return skills.length===(event?.options?.length??0)&&new Set(skills).size===1?skills[0]:null;
@@ -767,8 +882,8 @@ function queueTimedEvents(state) {
   let queuedThisPass=false;
   state.nextMajorEventAt??=0;
   const queueMajor=(id)=>{if(slotsUsed()>=5||queuedThisPass||state.eventQueue.length||state.elapsed<state.nextMajorEventAt)return false;state.eventCountsByDay[eventDay]=slotsUsed()+1;state.eventQueue.push(id);state.paused=true;queuedThisPass=true;state.nextMajorEventAt=state.elapsed+.65;return true;};
-  const paintTask=state.tasks.find(task=>task.id==='paint');
-  const prepTask=state.tasks.find(task=>task.id==='prep');
+  const paintTask=state.tasks.find(task=>['paint','wall-finish'].includes(task.id));
+  const prepTask=state.tasks.find(task=>['prep','protection','partitions'].includes(task.id));
   const paintIsCurrent=paintTask?.status==='active'||paintTask?.enabledToday||prepTask?.status==='done';
   if (state.elapsed >= 2.2 && state.paintEventOccurs!==false && paintIsCurrent && !state.eventsSeen.includes('paint-change')) {
     if(queueMajor('paint-change'))state.eventsSeen.push('paint-change');
@@ -927,6 +1042,9 @@ export function tickState(state, deltaHours) {
   unlockTasks(state);
   assignCrews(state);
   updateCrewPositions(state, deltaHours);
+  activatePendingManpower(state);
+  state.siteCongestion=calculateSiteCongestion(state);
+  const cleanliness=updateSiteCleanliness(state,deltaHours);
 
   const barkSlot = Math.floor(state.elapsed / 2.75);
   if (barkSlot > (state.lastBarkSlot ?? 0)) {
@@ -942,12 +1060,14 @@ export function tickState(state, deltaHours) {
     if (!crew) continue;
     const siteDiscipline=state.smokeBreak&&crew.id!=='foreman'?.82:1;
     const teamControl=state.team?.find(member=>member.id==='pm')?.hired?1:.72;
-    const occupiedPenalty=state.selectedOrder?.occupiedOffice?.82:1;const mismatchPenalty=task.profileMismatch?.55:1;const pressure=state.elapsed<(task.pressureUntil??0)?(task.pressureFactor??1):1;const playerPresence=state.playerZoneTaskId===task.id?1.18:1;
-    task.progress += (deltaHours * crew.speed * siteDiscipline * teamControl * occupiedPenalty * mismatchPenalty * pressure * playerPresence) / task.duration;
+    const occupiedPenalty=state.selectedOrder?.occupiedOffice?.82:1;const mismatchPenalty=task.profileMismatch?.55:1;const pressure=state.elapsed<(task.pressureUntil??0)?(task.pressureFactor??1):1;const playerPresence=state.playerZoneTaskId===task.id?1.18:1;const crowdingPenalty=(state.siteCongestion?.penalty??1)*localCrowdingPenalty(state,task);
+    const baseManpower=Math.max(1,crew.baseManpower??crewHeadcount(state,crew));const actualManpower=crewHeadcount(state,crew);const manpowerFactor=THREELESS_CLAMP(1+(actualManpower-baseManpower)*(actualManpower>=baseManpower?.06:.075),.65,1.3);
+    const cleanupDistraction=task.skill==='cleaning'||NON_PHYSICAL_TASKS.has(task.id)?1:cleanliness.distraction*(state.skippedTempoFactor??1);
+    task.progress += (deltaHours * crew.speed * siteDiscipline * teamControl * occupiedPenalty * mismatchPenalty * pressure * playerPresence * crowdingPenalty * manpowerFactor * cleanupDistraction) / task.duration;
     if (task.progress >= 1) completeTask(state, task, crew);
   }
 
-  if(!state.sitePhysicallyComplete&&state.tasks.filter(task=>!['project','executive-docs','inspect'].includes(task.id)).every(task=>['done','awaiting'].includes(task.status))) {
+  if(!state.sitePhysicallyComplete&&state.tasks.filter(task=>!['project','executive-docs','inspect'].includes(task.id)).every(task=>['done','skipped','awaiting'].includes(task.status))) {
     state.sitePhysicallyComplete=true;state.log.push({type:'done',text:'Физические работы закончены. Деньги ещё удерживает комплект ИД.'});
   }
 
@@ -961,7 +1081,7 @@ export function tickState(state, deltaHours) {
   }
 
   queueTimedEvents(state);
-  if (state.tasks.every((task) => task.status === 'done')) {settleProjectEconomy(state);state.completed = true;}
+  if (state.tasks.every((task) => ['done','skipped'].includes(task.status))) {settleProjectEconomy(state);state.completed = true;}
   return state;
 }
 
@@ -969,11 +1089,13 @@ export function getRisk(state) {
   if (state.budget < 0) return { level: 'critical', text: 'Бюджет превышен — согласуйте резерв' };
   const readySkills = [...new Set(state.tasks.filter((task) => task.status === 'ready').map((task) => task.skill))];
   const missing = readySkills.find((skill) => !state.crews.some((crew) => crew.skill === skill||crew.skill==='general'));
-  const labels = { design:'архитектор проекта',documentation:'специалист исполнительной документации',moving: 'перестановщики', paint: 'маляры', electric: 'электрики', furniture: 'сборщики мебели', cleaning: 'клининг' };
+  const labels = { design:'архитектор проекта',documentation:'специалист исполнительной документации',demolition:'демонтажники',construction:'общестроительная бригада',engineering:'монтажники инженерных сетей',moving: 'перестановщики', paint: 'маляры', electric: 'электрики', furniture: 'сборщики мебели', cleaning: 'клининг' };
   if (missing) return { level: 'warning', text: `Нет бригады: ${labels[missing] ?? missing}` };
   const deadline=state.contract?.deadlineHours??DEADLINE_HOURS;
   const qualityTarget=state.contract?.qualityTarget??78;
   if (state.elapsed > deadline * 0.78 && !state.completed) return { level: 'critical', text: 'Срок под угрозой — ускорьте критические работы' };
+  if((state.siteCongestion?.penalty??1)<.88)return {level:'warning',text:`На объекте тесно: темп −${Math.round((1-state.siteCongestion.penalty)*100)}%`};
+  if((state.siteDirt??0)>70)return {level:'warning',text:'Объект зарастает мусором: бригады убирают вместо своей работы'};
   if (state.quality < qualityTarget) return { level: 'warning', text: 'Прогноз качества ниже целевого уровня' };
   return { level: 'safe', text: 'Критических рисков нет' };
 }
