@@ -10,6 +10,7 @@ import {
   closeDayFinances,
   createInitialState,
   cyclePriority,
+  developHeadquarters,
   ensureOrganization,
   getResult,
   getRisk,
@@ -28,7 +29,7 @@ import {
   unlockTasks,
 } from './game-core.js';
 import { allRandomEvents, randomEventById } from './events/index.js';
-import { generateOrders } from './order-generator.js';
+import { createCampaignOrders, generateOrders } from './order-generator.js';
 import { bubbleFor, createPersonProfile, createVisualProfile } from './procedural-content.js';
 import { situationById } from './situations.js';
 
@@ -130,7 +131,12 @@ if(!Array.isArray(state.randomEvents)||state.randomEvents.length<12||!Array.isAr
   state.randomEvent=state.randomEvents[0];
 }
 unlockTasks(state);
-let orders = Array.isArray(state.orderOptions) && state.orderOptions.length ? state.orderOptions : generateOrders(Math.random, 8);
+function createOrderMarket(organization=ensureOrganization(state)) {
+  const campaign=createCampaignOrders();
+  const random=generateOrders(Math.random,5).map(order=>({...order,requiresProjects:Math.max(0,Math.min(2,Math.floor(order.complexity/2)-1))}));
+  return [...campaign,...random];
+}
+let orders = Array.isArray(state.orderOptions) && state.orderOptions.length ? state.orderOptions : createOrderMarket();
 state.orderOptions = orders;
 let selectedOrderId = state.selectedOrder?.id ?? orders[0]?.id;
 let visualProfile = createVisualProfile(state.visualSeed ?? 1, state.selectedOrder);
@@ -143,6 +149,9 @@ let resultShown = false;
 let selectedPerson = null;
 let communicationWasPaused = true;
 let selectedEmailTemplate = 'client';
+let audioEnabled=true;
+let audioContext=null;
+let cameraKick=0;
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value='') => String(value).replace(/[&<>'"]/g,(character)=>({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[character]));
@@ -192,7 +201,7 @@ function installPlayerState(rawState) {
   if(!Array.isArray(state.randomEvents)||state.randomEvents.length<12||!Array.isArray(state.eventSchedule)||state.randomEvents.some(id=>!randomEventById.has(id))) {
     const refreshedEvents=createInitialState(Math.random,allRandomEvents);state.randomEvents=refreshedEvents.randomEvents;state.eventSchedule=refreshedEvents.eventSchedule;state.randomEvent=state.randomEvents[0];
   }
-  orders=Array.isArray(state.orderOptions)&&state.orderOptions.length?state.orderOptions:generateOrders(Math.random,8);
+  orders=Array.isArray(state.orderOptions)&&state.orderOptions.length?state.orderOptions:createOrderMarket();
   state.orderOptions=orders;selectedOrderId=state.selectedOrder?.id??orders[0]?.id;
   visualProfile=createVisualProfile(state.visualSeed??1,state.selectedOrder);unlockTasks(state);rebuildTaskMarkers();
   renderedLogLength=state.log.length;resultShown=false;selectedPerson=null;
@@ -212,6 +221,9 @@ function renderMainMenu() {
   $('#organizationDebt').textContent=money(organization.debt);
   $('#organizationProjects').textContent=String(organization.projectsCompleted);
   $('#organizationReputation').textContent=`${organization.reputation} / 100`;
+  const hqCosts=[80,170,320,520];const hqCost=hqCosts[Math.min(state.hq?.level??0,hqCosts.length-1)];
+  $('#hqLevel').textContent=String(state.hq?.level??0);$('#hqTitle').textContent=state.hq?.title??'Стол у принтера';$('#hqStatus').textContent=state.hq?.lastFailure??'Клиентам строим лучше, чем себе.';$('#hqCost').textContent=`${hqCost}К`;
+  $('#developHqButton').disabled=organization.cash<hqCost;
   document.querySelectorAll('[data-loan]').forEach(button=>{button.disabled=state.started&&!state.completed;button.title=button.disabled?'Кредиты доступны только между проектами':'';});
 }
 
@@ -269,16 +281,42 @@ function showToast(text, type = '') {
   window.setTimeout(() => toast.remove(), 4200);
 }
 
+function ensureAudio() {
+  if(!audioEnabled)return null;
+  audioContext??=new (window.AudioContext||window.webkitAudioContext)();
+  if(audioContext.state==='suspended')audioContext.resume();
+  return audioContext;
+}
+
+function playSound(kind='click') {
+  const context=ensureAudio();if(!context)return;
+  const now=context.currentTime;const gain=context.createGain();gain.connect(context.destination);
+  const oscillator=context.createOscillator();oscillator.connect(gain);
+  const settings={click:[360,.045,.035],cash:[620,.11,.07],message:[760,.08,.055],risk:[120,.18,.08],done:[520,.18,.075],build:[95,.09,.035]}[kind]??[320,.06,.04];
+  oscillator.type=kind==='risk'||kind==='build'?'square':'sine';oscillator.frequency.setValueAtTime(settings[0],now);
+  if(kind==='done')oscillator.frequency.exponentialRampToValueAtTime(880,now+settings[1]);
+  if(kind==='build')oscillator.frequency.exponentialRampToValueAtTime(55,now+settings[1]);
+  gain.gain.setValueAtTime(settings[2],now);gain.gain.exponentialRampToValueAtTime(.0001,now+settings[1]);oscillator.start(now);oscillator.stop(now+settings[1]);
+}
+
+function feedback(kind='done') {
+  playSound(kind==='risk'?'risk':kind==='cash'?'cash':kind==='message'?'message':kind==='build'?'build':'done');
+  const flash=$('#feedbackFlash');flash.className=`feedback-flash ${kind==='risk'?'risk':''} visible`;window.setTimeout(()=>flash.classList.remove('visible'),150);
+  cameraKick=Math.max(cameraKick,kind==='risk'?.32:kind==='build'?.16:.08);
+}
+
 function renderOrders() {
   const selected=orders.find(order=>order.id===selectedOrderId)??orders[0];
   if(!selected)return;
   selectedOrderId=selected.id;
-  $('#orderPins').innerHTML=orders.map((order,index)=>`<button class="order-pin ${order.id===selected.id?'selected':''}" style="left:${order.mapX}%;top:${order.mapY}%;--pin:${order.color}" data-order-id="${order.id}" data-label="${order.location} · ${order.finishClass}"><span>${order.clientType==='state'?'Г':'₽'}${index+1}</span></button>`).join('');
+  const organization=ensureOrganization(state);const locked=(order)=>(order.requiresProjects??0)>organization.projectsCompleted;
+  $('#orderPins').innerHTML=orders.map((order,index)=>`<button class="order-pin ${order.id===selected.id?'selected':''} ${locked(order)?'locked':''}" style="left:${order.mapX}%;top:${order.mapY}%;--pin:${order.color}" data-order-id="${order.id}" data-label="${order.location} · ${order.finishClass}"><span>${order.tutorial?'У':order.clientType==='state'?'Г':'₽'}${index+1}</span></button>`).join('');
   $('#orderDetails').innerHTML=`<h2>${selected.title}</h2><span class="order-location">${selected.location} · ${selected.area.toLocaleString('ru-RU')} м²</span>
-    <div class="order-badges"><span class="${selected.clientType==='state'?'state':''}">${selected.clientType==='state'?'государство':'коммерция'}</span><span>${selected.projectTypeLabel}</span><span>класс ${selected.finishClass}</span><span>сложность ${'◆'.repeat(selected.complexity)}</span></div>
+    <div class="order-badges">${selected.tutorial?'<span>ОБУЧЕНИЕ</span>':''}${selected.campaign?`<span>ГЛАВА ${selected.chapter}</span>`:''}<span class="${selected.clientType==='state'?'state':''}">${selected.clientType==='state'?'государство':'коммерция'}</span><span>${selected.projectTypeLabel}</span><span>класс ${selected.finishClass}</span><span>сложность ${'◆'.repeat(selected.complexity)}</span></div>
     <div class="order-metrics"><div><small>СТАРТОВЫЙ БЮДЖЕТ</small><strong>${money(selected.budget)}</strong></div><div><small>СРОК</small><strong>${selected.deadlineHours} ч</strong></div><div><small>КАЧЕСТВО</small><strong>≥ ${selected.qualityTarget}</strong></div><div><small>ЗАКУПКА</small><strong>${selected.procurement}</strong></div></div>
     <div class="order-client"><strong>${selected.clientName}</strong><small>${selected.clientPerson} · ${selected.clientRole}<br>${selected.clientType==='state'?'Решение считается принятым, когда его приняли все отсутствующие.':'Хочет быстро, качественно и чтобы резерв не использовался.'}</small></div>
-    <ul class="order-risks">${selected.riskTags.map(risk=>`<li>${risk}</li>`).join('')}</ul>`;
+    <ul class="order-risks">${locked(selected)?`<li>Нужно закрыть проектов: ${selected.requiresProjects}. Сейчас: ${organization.projectsCompleted}.</li>`:''}${selected.riskTags.map(risk=>`<li>${risk}</li>`).join('')}</ul>`;
+  $('#acceptOrder').disabled=locked(selected);$('#acceptOrder').innerHTML=locked(selected)?`Сначала закрыть ${selected.requiresProjects} проект(а)`:'Вести переговоры <span>→</span>';
 }
 
 function updateMissionCopy() {
@@ -558,6 +596,29 @@ function renderHud() {
   document.querySelectorAll('[data-speed]').forEach((button) => button.classList.toggle('active', Number(button.dataset.speed) === state.speed));
 }
 
+function renderTutorial() {
+  document.querySelectorAll('.tutorial-highlight').forEach(element=>element.classList.remove('tutorial-highlight'));
+  const coach=$('#tutorialCoach');const tutorial=state.tutorial;
+  if(!tutorial?.active||tutorial.completed){coach.hidden=true;return;}
+  const pm=state.team?.find(member=>member.id==='pm')?.hired;
+  const movers=state.contractors?.find(item=>item.id==='movers')?.hired;
+  const enabled=state.tasks.some(task=>task.enabledToday&&!['done','active'].includes(task.status));
+  let step;
+  if((state.contract?.cardsPlayed?.length??0)<2)step={n:1,title:'Договоритесь о треугольнике',text:'Сыграйте две карты. Вы меняете бюджет, срок и качество ещё до выхода на площадку.',target:'#contractDeck'};
+  else if(state.phase==='negotiation')step={n:2,title:'Зафиксируйте договорённость',text:'Подпишите контракт. Аванс поступит на счёт объекта, остальное заказчик платит по закрытым этапам.',target:'#startMission'};
+  else if(state.phase==='preparation'&&!pm)step={n:3,title:'Наймите руководителя проекта',text:'Без своей команды подрядчики выбирают удобные задачи. РП заставит их соблюдать ваши приоритеты.',target:'[data-team-hire="pm"]'};
+  else if(state.phase==='preparation'&&!movers)step={n:4,title:'Дайте объекту руки',text:'Наймите перестановщиков. Они будут физически таскать материалы со склада в рабочую зону.',target:'[data-map-hire="movers"]'};
+  else if(state.phase==='preparation')step={n:5,title:'Выходите на объект',text:'Для следующих дней понадобятся и другие специалисты, но начать можно с управляемой связки.',target:'#enterSite'};
+  else if(state.phase==='schedule'&&!state.masterScheduleAccepted)step={n:6,title:'Примите общий график',text:'Задачи утренней планёрки берутся отсюда. Неверная последовательность создаёт настоящие переделки.',target:'#acceptSchedule'};
+  else if(state.needsPlanning&&!enabled)step={n:7,title:'Соберите план дня',text:'Выберите работы из графика. Для первого дня возьмите обследование и освобождение зоны.',target:'#dayPlanList'};
+  else if(state.needsPlanning)step={n:8,title:'Отправьте план бригадам',text:'После запуска смены вы управляете только связью, приоритетами и решениями.',target:'#startDay'};
+  else if(!tutorial.observedBuild)step={n:9,title:'Посмотрите, как строят',text:'Камера показывает результат буквально: материалы несут, инженерия и стены монтируются, мусор исчезает.',target:'.site-stage'};
+  else if(!tutorial.chatSent){const chatOpen=refs.communication.classList.contains('visible')&&$('#communicationWindow').classList.contains('is-whatsapp');step={n:10,title:'Вмешайтесь через чат',text:chatOpen?'Выберите работу и отправьте «сделать срочно». Это стоит денег и доверия, но меняет приоритет сразу.':'Откройте чат стройки и отправьте одно срочное сообщение. Время внутри чата остановлено.',target:chatOpen?'[data-send-urgent]':'#siteWhatsappButton'};}
+  else step={n:11,title:'Первый урок почти закрыт',text:'Завершите хотя бы одну работу. После этого случайные события снова получат право происходить.',target:'#taskList'};
+  $('#tutorialProgress').textContent=`ОБУЧЕНИЕ · ${step.n}/11`;$('#tutorialTitle').textContent=step.title;$('#tutorialText').textContent=step.text;coach.hidden=false;
+  document.querySelector(step.target)?.classList.add('tutorial-highlight');
+}
+
 function renderAll() {
   renderOrders();
   if(state.selectedOrder)renderNegotiation();
@@ -566,6 +627,7 @@ function renderAll() {
   renderContractors();
   renderCrews();
   renderSelection();
+  renderTutorial();
   syncSceneFromState();
 }
 
@@ -813,6 +875,26 @@ function makeOffice() {
   [[-1.8,.2],[2.7,1.4],[.8,-.9],[-.8,2.8],[3.4,.4]].forEach(([x,z],i)=>{
     const scrap=box('debris',[.18+i*.025,.04,.1+i*.03],[x,.055,z],mat(i%2?'#d8c6a4':'#848d86'),sceneProps.debris,false); scrap.rotation.y=i*.9;
   });
+  // Physical construction layers. Their geometry grows with task progress instead
+  // of teleporting from a spreadsheet state into a finished office.
+  sceneProps.partitions=new THREE.Group();sceneProps.partitions.name='build-partitions';office.add(sceneProps.partitions);
+  const partitionSpecs=[[-.9,-.2,3.25,.11,0],[1.55,.72,2.7,.11,0],[-.15,1.75,.11,2.35,1],[2.75,1.52,.11,1.75,1]];
+  sceneProps.partitionSegments=partitionSpecs.map(([x,z,w,d,axis],index)=>{
+    const wall=box('partition-segment',[w,1.55,d],[x,.78,z],mat(index%2?'#d9d6ca':'#e4dfd2'),sceneProps.partitions);wall.userData={axis,index,baseHeight:1.55};return wall;
+  });
+  sceneProps.engineering=new THREE.Group();sceneProps.engineering.name='build-engineering';office.add(sceneProps.engineering);
+  sceneProps.engineeringSegments=[];
+  [[-3.7,2.15,-.4,3.7,.07,.08],[-3.7,2.22,.25,3.7,.06,.06],[-1.8,2.32,-2.55,.08,.07,4.8],[1.65,2.28,-2.55,.12,.11,4.8]].forEach(([x,y,z,w,h,d],index)=>{
+    const conduit=box('engineering-segment',[w,h,d],[x,y,z],mat(index===3?'#7a9198':'#4d777f',.34,.4),sceneProps.engineering);conduit.userData={index,baseScale:conduit.scale.clone()};sceneProps.engineeringSegments.push(conduit);
+  });
+  sceneProps.ceilingTiles=new THREE.Group();sceneProps.ceilingTiles.name='ceiling-grid';office.add(sceneProps.ceilingTiles);
+  for(let x=-3.3;x<=3.3;x+=1.1)for(let z=-2.5;z<=2.5;z+=1.25){const panel=box('ceiling-panel',[.92,.025,.92],[x,2.52,z],mat('#e5e4dc',.55),sceneProps.ceilingTiles);panel.visible=false;}
+  sceneProps.finishBands=new THREE.Group();sceneProps.finishBands.name='finish-bands';office.add(sceneProps.finishBands);
+  for(let i=0;i<10;i++){const band=box('paint-band',[.96,1.46,.018],[-4.55+i*1.01,.77,gz(0)-.62],mat('#d87561',.64),sceneProps.finishBands);band.visible=false;}
+  sceneProps.handover=new THREE.Group();sceneProps.handover.name='handover';office.add(sceneProps.handover);
+  box('handover-stand',[1.65,.08,.55],[3.15,.74,3.1],mat('#ddff55'),sceneProps.handover);box('handover-sign',[1.45,.72,.06],[3.15,1.12,3.12],mat('#18211d'),sceneProps.handover);sceneProps.handover.visible=false;
+  sceneProps.workParticles=[];
+  for(let i=0;i<18;i++){const particle=new THREE.Mesh(new THREE.SphereGeometry(.025+(i%3)*.008,6,4),new THREE.MeshBasicMaterial({color:i%4===0?'#ffd45c':'#c4b59d',transparent:true,opacity:.72,depthWrite:false}));particle.visible=false;office.add(particle);sceneProps.workParticles.push(particle);}
   // Ceiling lights.
   sceneProps.lights = [];
   for(let x=-3;x<=3;x+=2) for(let z=-2;z<=2;z+=2) {
@@ -1080,6 +1162,30 @@ function syncSceneFromState() {
   const cleanTask=state.tasks.find(t=>t.id==='clean');
   const inspectTask=state.tasks.find(t=>t.id==='inspect');
 
+  const prepProgress=prepTask?.status==='done'?1:prepTask?.progress??0;
+  const partitionBase=siteType==='existing'?.18:0;
+  const partitionProgress=Math.max(partitionBase,prepProgress);
+  sceneProps.partitions.visible=partitionProgress>.01;
+  sceneProps.partitionSegments.forEach((wall,index)=>{
+    const fraction=THREE.MathUtils.clamp(partitionProgress*sceneProps.partitionSegments.length-index,0,1);
+    wall.scale.y=Math.max(.025,fraction);wall.position.y=.03+.75*fraction;
+  });
+
+  const engineeringProgress=electricTask?.status==='done'?1:electricTask?.progress??0;
+  sceneProps.engineering.visible=engineeringProgress>.01;
+  sceneProps.engineeringSegments.forEach((segment,index)=>{
+    const fraction=THREE.MathUtils.clamp(engineeringProgress*sceneProps.engineeringSegments.length-index,0,1);
+    segment.scale.x=segment.geometry.parameters?.width>1?Math.max(.02,fraction):1;
+    segment.scale.z=segment.geometry.parameters?.depth>1?Math.max(.02,fraction):1;
+    segment.visible=fraction>.01;
+  });
+  const ceilingCount=Math.round(engineeringProgress*sceneProps.ceilingTiles.children.length);
+  sceneProps.ceilingTiles.children.forEach((panel,index)=>{panel.visible=index<ceilingCount;panel.position.y=2.32+Math.min(1,engineeringProgress*sceneProps.ceilingTiles.children.length-index)*.2;});
+
+  const finishProgress=paintTask?.status==='done'?1:paintTask?.progress??0;
+  sceneProps.finishBands.children.forEach((band,index)=>{const fraction=THREE.MathUtils.clamp(finishProgress*sceneProps.finishBands.children.length-index,0,1);band.visible=fraction>.01;band.scale.y=Math.max(.02,fraction);band.position.y=.04+.73*fraction;band.material.color.set(state.sceneEffect?.wallColor??visualProfile.theme.wall);});
+  sceneProps.handover.visible=inspectTask?.status==='done'||(inspectTask?.progress??0)>.65;
+
   const cratesRemoved=moveTask?.status==='done'?sceneProps.crates.children.length:Math.floor((moveTask?.progress??0)*sceneProps.crates.children.length);
   sceneProps.crates.children.forEach((crate,index)=>{crate.visible=index<sceneProps.crates.children.length-cratesRemoved;});
 
@@ -1097,6 +1203,8 @@ function syncSceneFromState() {
   sceneProps.cables.visible=electricTask?.status!=='done';
   const constructionStarted=state.tasks.some(task=>task.id!=='survey'&&['active','done'].includes(task.status));
   sceneProps.debris.visible=constructionStarted&&cleanTask?.status!=='done';
+  const activePhysical=state.tasks.find(task=>task.status==='active'&&['move','electric','prep','paint','desks','clean'].includes(task.id));
+  sceneProps.workParticles.forEach(particle=>{particle.visible=Boolean(activePhysical);particle.userData.taskId=activePhysical?.id;});
 
   const electricPower=state.sceneEffect?.lightPower??(electricTask?.status==='done'?1:electricTask?.status==='active'?electricTask.progress:0);
   sceneProps.lights.forEach(light=>{light.intensity=electricPower*1.15;light.userData.fixture.material.emissive?.set('#fff0bc');light.userData.fixture.material.emissiveIntensity=electricPower*1.6;});
@@ -1137,34 +1245,49 @@ function animateScene(now) {
   for(const [crewIndex,crew] of state.crews.entries()) {
     const mesh=crewMeshes.get(crew.id); if(!mesh) continue;
     const patrol=crew.taskId||crew.id==='foreman'||crew.id.startsWith('team-');
-    const wander=patrol?(crew.taskId ? 1.05 : .72):0;
+    const wander=patrol?(crew.taskId ? .34 : .72):0;
     const phase=crewIndex*1.73;
     const routeX=Math.sin(t*.48+phase)+Math.sin(t*.19+phase*.7)*.34;
     const routeZ=Math.cos(t*.37+phase*.82)+Math.sin(t*.23+phase)*.28;
     const target=new THREE.Vector3(siteX(crew.x)+routeX*wander,.03,siteZ(crew.y)+routeZ*wander);
     const delta=target.clone().sub(mesh.position);
-    if(delta.lengthSq()>.002) mesh.rotation.y=Math.atan2(delta.x,delta.z);
+    mesh.rotation.y=0;
     mesh.position.lerp(target,.055);
     if(patrol) {
       mesh.position.y=.03+Math.abs(Math.sin(t*6.6+crew.x))*.065;
       for(const [index,person] of mesh.userData.people.entries()) {
-        const swing=Math.sin(t*8.2+index)*.58;
+        const physical=['moving','paint','electric','furniture','cleaning'].includes(crew.skill)&&crew.taskId;
+        const deliveryCycle=(t*.075+crewIndex*.17)%1;
+        const travel=physical&&index===0?(deliveryCycle<.45?THREE.MathUtils.smoothstep(deliveryCycle,0,.45):deliveryCycle<.56?1:THREE.MathUtils.smoothstep(1-deliveryCycle,0,.44)):0;
+        const base=person.userData.baseLocal;
+        const yardX=(6.25+(footprintScale()-1)*5.2)-mesh.position.x;const yardZ=1.2-mesh.position.z;
+        person.position.x=THREE.MathUtils.lerp(base.x+Math.sin(t*1.35+index)*.08,yardX,travel);person.position.z=THREE.MathUtils.lerp(base.z+Math.cos(t*1.05+index)*.1,yardZ,travel);
+        const walking=travel>.03&&travel<.97;const swing=Math.sin(t*(walking?10.2:6.4)+index)*(.22+(walking?.48:.08));
         const workBeat=crew.taskId?Math.sin(t*4.6+index):0;
-        const base=person.userData.baseLocal;person.position.x=base.x+Math.sin(t*1.35+index)*.11;person.position.z=base.z+Math.cos(t*1.05+index)*.14;
         person.userData.leftLeg.rotation.x=swing; person.userData.rightLeg.rotation.x=-swing;
-        person.userData.leftArm.rotation.x=-swing*.72+(crew.skill==='paint'?workBeat*.55:0); person.userData.rightArm.rotation.x=swing*.72+(crew.skill==='furniture'?-.55:0);
-        person.userData.bubble.visible=Math.sin(t*.9+index*2.1+crew.x)>.78;
+        const paintMotion=crew.skill==='paint'&&!walking?workBeat*.82:0;const drillMotion=crew.skill==='electric'&&!walking?Math.sin(t*18+index)*.34:0;const carryPose=walking&&physical?-.72:0;
+        person.userData.leftArm.rotation.x=-swing*.55+paintMotion+carryPose;person.userData.rightArm.rotation.x=swing*.55+drillMotion+(crew.skill==='furniture'&&!walking?-.55:carryPose);
+        person.rotation.y=walking?Math.atan2(yardX-base.x,yardZ-base.z)+(deliveryCycle>.56?Math.PI:0):Math.sin(t*.4+index)*.25;
+        person.userData.bubble.visible=!walking&&Math.sin(t*.9+index*2.1+crew.x)>.78;
       }
     } else {
       mesh.position.y=.03;
       for(const person of mesh.userData.people) {
         person.userData.leftLeg.rotation.x=0;person.userData.rightLeg.rotation.x=0;
         person.userData.leftArm.rotation.x=Math.sin(t*1.7+crew.x)*.05;person.userData.rightArm.rotation.x=-Math.sin(t*1.7+crew.x)*.05;
-        person.userData.bubble.visible=false;
+        person.rotation.y=Math.sin(t*.22+(person.userData.variant??0))*.32;person.userData.bubble.visible=Math.sin(t*.42+(person.userData.variant??0)*2.4)>.9;
       }
     }
     const hasQuestion=(state.activeSituations??[]).some(item=>item.crewId===crew.id);
     mesh.userData.people.forEach((person,index)=>{person.userData.alertBubble.visible=hasQuestion&&index===0;if(hasQuestion)person.userData.bubble.visible=false;});
+  }
+
+  const activeTask=state.tasks.find(task=>task.status==='active'&&['move','electric','prep','paint','desks','clean'].includes(task.id));
+  for(const [index,particle] of sceneProps.workParticles.entries()) {
+    if(!particle.visible||!activeTask)continue;
+    const cycle=(t*(activeTask.id==='electric'?2.8:.72)+index*.113)%1;
+    particle.position.set(siteX(activeTask.x)+Math.sin(index*2.4)*(.2+cycle*.45),.12+cycle*(activeTask.id==='electric'?.55:1.15),siteZ(activeTask.y)+Math.cos(index*1.7)*(.18+cycle*.38));
+    particle.material.opacity=(1-cycle)*(activeTask.id==='electric'?.95:.38);particle.scale.setScalar(activeTask.id==='electric'?.55+cycle:1+cycle*1.6);
   }
 
   if(sceneProps.architect?.visible) {
@@ -1267,16 +1390,17 @@ function showResult() {
 }
 
 document.addEventListener('click',(event)=>{
+  ensureAudio();
   const loanButton=event.target.closest('[data-loan]');
-  if(loanButton){const loan=takeOrganizationLoan(state,Number(loanButton.dataset.loan));if(loan.ok){renderMainMenu();persistGame();showToast(`Кредит получен: ${money(loan.principal)}. Вернуть придётся ${money(loan.repayment)}.`,'risk');}else showToast(loan.reason==='project-active'?'Банк кредитует только между проектами.':'Кредитный комитет уже нервничает. Лимит исчерпан.','risk');}
+  if(loanButton){const loan=takeOrganizationLoan(state,Number(loanButton.dataset.loan));if(loan.ok){renderMainMenu();persistGame();feedback('cash');showToast(`Кредит получен: ${money(loan.principal)}. Вернуть придётся ${money(loan.repayment)}.`,'risk');}else showToast(loan.reason==='project-active'?'Банк кредитует только между проектами.':'Кредитный комитет уже нервничает. Лимит исчерпан.','risk');}
   const orderPin=event.target.closest('[data-order-id]');
   if(orderPin){selectedOrderId=orderPin.dataset.orderId;renderOrders();}
   const contractCard=event.target.closest('[data-contract-card]');
   if(contractCard){const card=CONTRACT_CARDS.find(item=>item.id===contractCard.dataset.contractCard);if(applyContractCard(state,card)){renderNegotiation();renderHud();}}
   const teamHire=event.target.closest('[data-team-hire]');
-  if(teamHire){const result=hireTeamMember(state,teamHire.dataset.teamHire);if(result.ok){renderPreparation();renderAll();showToast(`${result.member.name}: теперь у проекта есть ${result.member.role.toLowerCase()}.`,'done');}else if(result.reason==='budget')showToast('На собственную команду не хватило собственного бюджета.','risk');}
+  if(teamHire){const result=hireTeamMember(state,teamHire.dataset.teamHire);if(result.ok){renderPreparation();renderAll();feedback('cash');showToast(`${result.member.name}: теперь у проекта есть ${result.member.role.toLowerCase()}.`,'done');}else if(result.reason==='budget')showToast('На собственную команду не хватило собственного бюджета.','risk');}
   const mapHire=event.target.closest('[data-map-hire]');
-  if(mapHire){const result=hireContractor(state,mapHire.dataset.mapHire);if(result.ok){renderPreparation();renderAll();showToast(`${result.contractor.company}: едут на объект. Возможно, даже на этот.`,'done');}else if(result.reason==='budget')showToast('Мобилизация не помещается в бюджет.','risk');}
+  if(mapHire){const result=hireContractor(state,mapHire.dataset.mapHire);if(result.ok){renderPreparation();renderAll();feedback('cash');showToast(`${result.contractor.company}: едут на объект. Возможно, даже на этот.`,'done');}else if(result.reason==='budget')showToast('Мобилизация не помещается в бюджет.','risk');}
   const dayTask=event.target.closest('[data-day-task]');
   if(dayTask){const task=state.tasks.find(item=>item.id===dayTask.dataset.dayTask);if(task){if(task.enabledToday)cyclePriority(state,task.id);else task.enabledToday=true;renderDayPlan();}}
   const scheduleDay=event.target.closest('[data-schedule-day]');
@@ -1284,7 +1408,7 @@ document.addEventListener('click',(event)=>{
   const scheduleOrder=event.target.closest('[data-schedule-order]');
   if(scheduleOrder){moveMasterScheduleTask(state,scheduleOrder.dataset.scheduleTask,Number(scheduleOrder.dataset.scheduleOrder));renderMasterSchedule();}
   const sendUrgent=event.target.closest('[data-send-urgent]');
-  if(sendUrgent){const task=state.tasks.find(item=>item.id===$('#urgentTaskSelect')?.value);const message=$('#urgentMessageInput')?.value?.trim()||'Сделать срочно.';if(task&&state.budget>=5){state.budget-=5;state.trust=Math.max(0,state.trust-1);task.enabledToday=true;task.priority=3;state.chatMessages??=[];state.chatMessages.push({mine:true,name:sessionUser??'Вы',text:`${message} — ${task.title}`,time:projectTime()});state.chatMessages=state.chatMessages.slice(-14);renderAll();renderWhatsapp();persistGame();showToast(`Сообщение отправлено: «${task.short} — срочно».`,'risk');}else showToast('Даже срочность теперь не по бюджету.','risk');}
+  if(sendUrgent){const task=state.tasks.find(item=>item.id===$('#urgentTaskSelect')?.value);const message=$('#urgentMessageInput')?.value?.trim()||'Сделать срочно.';if(task&&state.budget>=5){state.budget-=5;state.trust=Math.max(0,state.trust-1);task.enabledToday=true;task.priority=3;state.chatMessages??=[];state.chatMessages.push({mine:true,name:sessionUser??'Вы',text:`${message} — ${task.title}`,time:projectTime()});state.chatMessages=state.chatMessages.slice(-14);if(state.tutorial)state.tutorial.chatSent=true;feedback('message');renderAll();renderWhatsapp();persistGame();showToast(`Сообщение отправлено: «${task.short} — срочно».`,'risk');}else showToast('Даже срочность теперь не по бюджету.','risk');}
   const emailTemplate=event.target.closest('[data-email-template]');
   if(emailTemplate)renderEmailComposer(emailTemplate.dataset.emailTemplate);
   const sendEmail=event.target.closest('[data-send-email]');
@@ -1300,7 +1424,7 @@ document.addEventListener('click',(event)=>{
     const catalogEvent=randomEventById.get(eventShowing);
     if(catalogEvent) applyCatalogEventChoice(state,catalogEvent,choice.dataset.eventChoice);
     else applyEventChoice(state,eventShowing,choice.dataset.eventChoice);
-    refs.event.classList.remove('visible');showToast('Решение принято. Последствия уже в пути.');eventShowing=null;renderAll();
+    refs.event.classList.remove('visible');feedback(catalogEvent?.options?.find(option=>option.id===choice.dataset.eventChoice)?.deltas?.budget<0?'risk':'done');showToast('Решение принято. Последствия уже в пути.');eventShowing=null;renderAll();
   }
   const situationChoice=event.target.closest('[data-situation-choice]');
   if(situationChoice&&openSituationId){resolveSituation(state,openSituationId,situationChoice.dataset.situationChoice);openSituationId=null;refs.situation.classList.remove('visible');state.paused=false;renderAll();showToast('Ответ отправлен. Подрядчик понял его в пределах своей сметы.');}
@@ -1309,17 +1433,17 @@ document.addEventListener('click',(event)=>{
 });
 
 $('#acceptOrder').addEventListener('click',()=>{
-  const order=orders.find(item=>item.id===selectedOrderId);if(!order||!selectOrder(state,order))return;
+  const order=orders.find(item=>item.id===selectedOrderId);if(!order)return;if(!selectOrder(state,order)){showToast((order.requiresProjects??0)>ensureOrganization(state).projectsCompleted?'Этот заказ откроется после предыдущей главы.':'Не хватает оборотных денег организации. Вернитесь в меню за кредитом.','risk');feedback('risk');return;}
   visualProfile=createVisualProfile(order.visualSeed,order);
   rebuildTaskMarkers();
   if(sceneProps.client)sceneProps.client.userData.displayName=order.clientPerson;
-  refs.orders.classList.remove('visible');refs.brief.classList.add('visible');renderAll();showToast(`Заказ выбран: ${order.location}. Теперь попробуйте договориться.`);
+  refs.orders.classList.remove('visible');refs.brief.classList.add('visible');renderAll();feedback('cash');showToast(`Заказ выбран: ${order.location}. Мобилизация организации ${money(state.organizationMobilization)}.`);
 });
-$('#regenerateOrders').addEventListener('click',()=>{orders=generateOrders(Math.random,8);state.orderOptions=orders;selectedOrderId=orders[0].id;renderOrders();showToast('Рынок обновлён. Хорошие объекты снова разобрали до публикации.');});
+$('#regenerateOrders').addEventListener('click',()=>{orders=createOrderMarket();state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=ensureOrganization(state).projectsCompleted)?.id??orders[0].id;renderOrders();showToast('Рынок обновлён. Сюжетные заказы остались: рекомендации помнят ваши объекты.');});
 $('#startMission').addEventListener('click',()=>{if(state.contract.cardsPlayed.length!==2)return;state.phase='preparation';refs.brief.classList.remove('visible');refs.market.classList.add('visible');renderPreparation();renderAll();showToast('Контракт подписан. Мелкий шрифт ликует.');});
 $('#enterSite').addEventListener('click',()=>{state.phase='schedule';state.paused=true;refs.market.classList.remove('visible');openMasterSchedule();showToast('Сначала примите общий график. Потом начнётся ежедневный управленческий оптимизм.');});
 $('#acceptSchedule').addEventListener('click',()=>{state.masterScheduleAccepted=true;refs.schedule.classList.remove('visible');if(!state.started){state.started=true;state.phase='planning';state.paused=true;state.needsPlanning=true;state.plannedDay=Math.floor(state.elapsed/24);for(const task of state.tasks)task.enabledToday=false;unlockTasks(state);renderDayPlan();refs.planning.classList.add('visible');showToast('Общий график принят. Утро берёт из него работы дня.','done');}else{state.paused=scheduleWasPaused;showToast('Общий график обновлён. Завершённые работы в планёрку не вернутся.','done');}renderAll();persistGame();});
-$('#startDay').addEventListener('click',()=>{if(!state.tasks.some(task=>task.enabledToday&&!['done','active'].includes(task.status))){showToast('Выберите хотя бы одну работу. Даже хаосу нужен старт.','risk');return;}state.needsPlanning=false;state.plannedDay=Math.floor(state.elapsed/24);state.phase='execution';state.paused=false;refs.planning.classList.remove('visible');renderAll();showToast('План отправлен. Через минуту он станет исходной гипотезой.','done');});
+$('#startDay').addEventListener('click',()=>{if(!state.tasks.some(task=>task.enabledToday&&!['done','active'].includes(task.status))){showToast('Выберите хотя бы одну работу. Даже хаосу нужен старт.','risk');return;}state.needsPlanning=false;state.plannedDay=Math.floor(state.elapsed/24);state.phase='execution';state.paused=false;refs.planning.classList.remove('visible');renderAll();feedback('build');showToast('План отправлен. Площадка реагирует сразу: смотрите, что люди реально делают.','done');});
 $('#whatsappButton').addEventListener('click',()=>openCommunication('whatsapp'));
 $('#emailButton').addEventListener('click',()=>openCommunication('email'));
 $('#siteWhatsappButton').addEventListener('click',()=>openCommunication('whatsapp'));
@@ -1337,11 +1461,14 @@ $('#sendReport').addEventListener('click',()=>{const day=Math.floor(state.elapse
 $('#briefButton').addEventListener('click',()=>state.selectedOrder?refs.brief.classList.add('visible'):refs.orders.classList.add('visible'));
 $('#pauseButton').addEventListener('click',()=>{if(!state.started)return;state.paused=!state.paused;renderHud();});
 $('#sitePauseButton').addEventListener('click',()=>{if(!state.started)return;state.paused=!state.paused;renderHud();});
+$('#soundToggle').addEventListener('click',()=>{audioEnabled=!audioEnabled;$('#soundToggle').textContent=audioEnabled?'♪':'×';$('#soundToggle').title=audioEnabled?'Звук включён':'Звук выключен';if(audioEnabled)playSound('click');});
+$('#skipTutorial').addEventListener('click',()=>{if(state.tutorial){state.tutorial.active=false;state.tutorial.completed=true;}renderTutorial();persistGame();showToast('Обучение пропущено. События снова имеют доступ к объекту.','risk');});
+$('#developHqButton').addEventListener('click',()=>{const outcome=developHeadquarters(state);if(!outcome.ok){showToast('На офис для себя снова не хватило денег. Символично.','risk');return;}feedback(outcome.success?'done':'risk');renderMainMenu();persistGame();showToast(outcome.success?`Собственный офис улучшен: ${outcome.title}.`:`Потрачено ${money(outcome.cost)}. ${outcome.lastFailure}`,outcome.success?'done':'risk');});
 document.querySelectorAll('[data-speed]').forEach(button=>button.addEventListener('click',()=>{state.speed=Number(button.dataset.speed);state.paused=false;renderHud();}));
 $('#zoomIn').addEventListener('click',()=>{cameraZoom=Math.min(1.65,cameraZoom+.12);updateCamera();});
 $('#zoomOut').addEventListener('click',()=>{cameraZoom=Math.max(.72,cameraZoom-.12);updateCamera();});
 $('#zoomReset').addEventListener('click',()=>{cameraAngle=Math.PI/4;cameraZoom=1;updateCamera();});
-function resetGame(){const hq=state.hq;const organization=ensureOrganization(state);state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.organization=organization;saved=null;orders=generateOrders(Math.random,8);state.orderOptions=orders;selectedOrderId=orders[0].id;visualProfile=createVisualProfile(1);unlockTasks(state);renderedLogLength=0;resultShown=false;selectedPerson=null;for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();}
+function resetGame(){const hq=state.hq;const organization=ensureOrganization(state);state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.organization=organization;saved=null;orders=createOrderMarket(organization);state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0].id;visualProfile=createVisualProfile(1);unlockTasks(state);renderedLogLength=0;resultShown=false;selectedPerson=null;for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();}
 $('#resetButton').addEventListener('click',resetGame);
 $('#playAgain').addEventListener('click',()=>{refs.result.classList.remove('visible');saved=null;renderMainMenu();refs.menu.classList.add('visible');});
 $('#continueGameButton').addEventListener('click',()=>{if(saved)resumePlayerGame();});
@@ -1350,13 +1477,15 @@ $('#newGameButton').addEventListener('click',()=>{refs.menu.classList.remove('vi
 function frame(now) {
   const dt=Math.min(.08,(now-lastFrame)/1000); lastFrame=now;
   tickState(state,dt*state.speed*GAME_HOURS_PER_REAL_SECOND);
-  if(state.log.length>renderedLogLength){for(const item of state.log.slice(renderedLogLength))showToast(item.text,item.type);renderedLogLength=state.log.length;renderAll();}
+  if(state.log.length>renderedLogLength){for(const item of state.log.slice(renderedLogLength)){showToast(item.text,item.type);if(item.type==='start')feedback('build');else if(item.type==='done')feedback('done');else if(item.type==='risk'||item.type==='event')feedback('risk');}renderedLogLength=state.log.length;renderAll();}
   if(state.needsPlanning&&!refs.planning.classList.contains('visible')){renderDayPlan();refs.planning.classList.add('visible');}
   if(state.needsReport)openReport();
   const managementOpen=[refs.auth,refs.menu,refs.orders,refs.brief,refs.market,refs.communication,refs.schedule,refs.team,refs.finance,refs.docs,refs.planning,refs.report,refs.situation,refs.result].some(modal=>modal?.classList.contains('visible'));
   if(state.eventQueue.length&&!eventShowing&&!refs.event.classList.contains('visible')&&!managementOpen)openEvent(state.eventQueue[0]);
   if(state.completed)showResult();
-  renderHud(); syncSceneFromState(); animateScene(now); resizeRenderer(); renderer.render(scene,camera);
+  renderHud();renderTutorial();syncSceneFromState();animateScene(now);resizeRenderer();
+  if(cameraKick>.005){updateCamera();camera.position.x+=Math.sin(now*.11)*cameraKick;camera.position.y+=Math.cos(now*.09)*cameraKick*.35;camera.lookAt(cameraTarget);cameraKick*=.86;}
+  renderer.render(scene,camera);
   if(now-lastSaved>2500){persistGame();lastSaved=now;}
   requestAnimationFrame(frame);
 }

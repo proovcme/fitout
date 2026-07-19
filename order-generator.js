@@ -116,6 +116,45 @@ export function buildTasksForOrder(order) {
   }));
 }
 
+const CAMPAIGN_SPECS = [
+  {
+    id:'campaign-tutorial', tutorial:true, requiresProjects:0, chapter:1,
+    title:'Переговорная к понедельнику', clientName:'ООО «Первые вводные»', clientPerson:'Анна Крылова', clientRole:'генеральный директор', clientType:'commercial',
+    projectType:'refresh', projectTypeLabel:'Учебный ремонт без выселения', area:180, finishClass:'B', finishClassId:'b', finishQuality:76,
+    complexity:1, budget:760, deadlineHours:72, qualityTarget:74, location:'Москва, Басманный', mapX:28, mapY:36, color:'#ddff55',
+    riskTags:['первая миссия: события отключены, пока вы осваиваете управление','заказчик уже выбрал цвет, но это не считается гарантией'], procurement:'прямой договор и одна честная смета', visualSeed:5005,
+  },
+  {
+    id:'campaign-floor', requiresProjects:1, chapter:2,
+    title:'Этаж для компании, которая выросла быстрее проекта', clientName:'АО «Север Софт»', clientPerson:'Игорь Ланской', clientRole:'операционный директор', clientType:'commercial',
+    projectType:'renovation', projectTypeLabel:'Капитальный ремонт', area:620, finishClass:'A', finishClassId:'a', finishQuality:82,
+    complexity:2, budget:1580, deadlineHours:118, qualityTarget:81, location:'Москва, Павелецкая', mapX:47, mapY:30, color:'#a58ae1',
+    riskTags:['заказчик помнит, как вы сдали первую переговорную','сотрудники продолжают работать внутри будущего объекта'], procurement:'рамочный договор после учебного успеха', visualSeed:5017,
+  },
+  {
+    id:'campaign-hq', requiresProjects:2, chapter:3,
+    title:'Штаб-квартира с бетоном и амбициями', clientName:'«Параллель Банк»', clientPerson:'Олег Марков', clientRole:'директор по развитию', clientType:'commercial',
+    projectType:'shell', projectTypeLabel:'Fit-out в shell & core', area:1180, finishClass:'A+', finishClassId:'aplus', finishQuality:88,
+    complexity:4, budget:3520, deadlineHours:188, qualityTarget:88, location:'Москва, Сити', mapX:64, mapY:42, color:'#69bfe8',
+    riskTags:['этот заказчик пришёл по рекомендации предыдущего','итальянская мебель пока существует только в презентации'], procurement:'закрытый тендер, открытые нервы', visualSeed:5033,
+  },
+  {
+    id:'campaign-ministry', requiresProjects:3, chapter:4,
+    title:'Дирекция понятных процедур на чистом поле', clientName:'Министерство понятных процедур', clientPerson:'Валерий Петрович', clientRole:'заместитель директора департамента', clientType:'state',
+    projectType:'greenfield', projectTypeLabel:'Стройка с чистого поля', area:2240, finishClass:'B', finishClassId:'b', finishQuality:76,
+    complexity:5, budget:5980, deadlineHours:286, qualityTarget:80, location:'Нижний Новгород, Стрелка', mapX:76, mapY:57, color:'#d87561',
+    riskTags:['квалификацию дали три предыдущих объекта','решение считается принятым после регистрации решения о регистрации'], procurement:'44-ФЗ и двенадцать печатей', visualSeed:5051,
+  },
+];
+
+export function createCampaignOrders() {
+  return CAMPAIGN_SPECS.map((spec)=>{
+    const tasks=buildTasksForOrder(spec);
+    if(spec.tutorial){for(const task of tasks)task.duration=Math.max(2,Math.round(task.duration*.62));tasks.find(task=>task.id==='move').deps=[];}
+    return { ...spec, campaign:true, tasks };
+  });
+}
+
 export function generateOrders(rng = Math.random, count = 7) {
   const orders = [];
   for (let index = 0; index < count; index += 1) {

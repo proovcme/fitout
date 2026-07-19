@@ -14,7 +14,7 @@
       <header class="topbar">
         <div class="brand" aria-label="FITOUT">
           <span class="brand-mark">F</span>
-          <span class="brand-copy"><strong>FITOUT</strong><small>технический заказчик</small></span>
+          <span class="brand-copy"><strong>FITOUT</strong><small>технический заказчик · v0.0.5</small></span>
         </div>
 
         <div class="mission-label">
@@ -90,6 +90,7 @@
             <div class="live-chip"><i></i><span id="siteStatus">Объект принят</span></div>
             <div class="view-actions">
               <button class="site-pause-button" id="sitePauseButton" title="Пауза на объекте" aria-label="Пауза на объекте">Ⅱ <span>ПАУЗА</span></button>
+              <button id="soundToggle" title="Звук" aria-label="Включить или выключить звук">♪</button>
               <button id="zoomOut" title="Уменьшить" aria-label="Уменьшить">−</button>
               <button id="zoomReset" title="Вернуть масштаб" aria-label="Вернуть масштаб">
                 <svg viewBox="0 0 24 24"><path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4"/></svg>
@@ -103,6 +104,7 @@
             <span><i class="done-dot"></i>Готово</span>
           </div>
           <div class="selection-card" id="selectionCard" hidden></div>
+          <div class="feedback-flash" id="feedbackFlash" aria-hidden="true"></div>
           <div class="toast-stack" id="toastStack" aria-live="polite"></div>
         </section>
 
@@ -141,6 +143,12 @@
       </footer>
     </div>
 
+    <aside class="tutorial-coach" id="tutorialCoach" hidden aria-live="polite">
+      <header><span id="tutorialProgress">ОБУЧЕНИЕ · 1/7</span><button id="skipTutorial" type="button">Пропустить</button></header>
+      <h2 id="tutorialTitle">Ваш первый объект</h2>
+      <p id="tutorialText">Делайте указанное действие — подсказка перейдёт дальше сама.</p>
+    </aside>
+
     <div class="modal-backdrop visible" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
       <section class="auth-modal">
         <div class="auth-visual auth-cover" aria-hidden="true">
@@ -174,6 +182,10 @@
             <header><span><small>ВАША ОРГАНИЗАЦИЯ</small><strong id="organizationName">ООО «Потом согласуем»</strong></span><b id="organizationCash">320 000 ₽</b></header>
             <div class="organization-metrics"><span><small>ДОЛГ</small><b id="organizationDebt">0 ₽</b></span><span><small>ПРОЕКТЫ</small><b id="organizationProjects">0</b></span><span><small>РЕПУТАЦИЯ</small><b id="organizationReputation">50</b></span></div>
             <div class="loan-actions"><span>Не хватает оборотки?</span><button type="button" data-loan="300">Кредит 300К · 16%</button><button type="button" data-loan="800">Кредит 800К · 22%</button></div>
+          </section>
+          <section class="hq-menu-card" aria-label="Собственный офис">
+            <span><small>СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ <b id="hqLevel">0</b></small><strong id="hqTitle">Стол у принтера</strong><em id="hqStatus">Клиентам строим лучше, чем себе.</em></span>
+            <button type="button" id="developHqButton">Попытаться улучшить · <b id="hqCost">80К</b></button>
           </section>
           <nav class="source-links" aria-label="Материалы об офисах"><a href="https://www.youtube.com/@Olsedmi" target="_blank" rel="noreferrer">▶ YouTube · Офисная среда</a><a href="https://t.me/all_about_offices" target="_blank" rel="noreferrer">➤ Telegram · Всё об офисах</a></nav>
           <button class="primary-button menu-button" id="continueGameButton" type="button"><span><b>Продолжить</b><small>Вернуться на текущий объект</small></span><strong>→</strong></button>

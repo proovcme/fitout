@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/fg/',
+  // Relative assets let the same release live at les.ovc.me/fg/ and at the
+  // dedicated fitout.ovc.me root without producing two different bundles.
+  base: './',
   server: {
     proxy: {
       '/fg-api': {

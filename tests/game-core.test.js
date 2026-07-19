@@ -5,6 +5,7 @@ import {
   applyCatalogEventChoice,
   createInitialState,
   cyclePriority,
+  developHeadquarters,
   hireContractor,
   hireTeamMember,
   selectOrder,
@@ -13,7 +14,7 @@ import {
   unlockTasks,
 } from '../game-core.js';
 import { allRandomEvents } from '../events/index.js';
-import { generateOrders, makeSeededRng } from '../order-generator.js';
+import { createCampaignOrders, generateOrders, makeSeededRng } from '../order-generator.js';
 
 test('only dependency-free work unlocks initially', () => {
   const state = createInitialState();
@@ -151,4 +152,35 @@ test('organization carries project profit and interest-bearing debt between proj
   assert.equal(state.organization.projectsCompleted,1);
   assert.equal(state.organization.totalProfit,-50);
   assert.equal(state.organization.cash,570);
+});
+
+test('campaign starts with a protected tutorial and unlocks linked orders by reputation history', () => {
+  const campaign=createCampaignOrders();
+  assert.equal(campaign.length,4);
+  assert.equal(campaign[0].tutorial,true);
+  assert.deepEqual(campaign.map(order=>order.requiresProjects),[0,1,2,3]);
+  assert.ok(campaign[0].tasks.find(task=>task.id==='move').deps.length===0);
+  const state=createInitialState();
+  assert.equal(selectOrder(state,campaign[1]),false);
+  assert.equal(selectOrder(state,campaign[0]),true);
+  assert.equal(state.tutorial.active,true);
+  assert.ok(state.organization.cash<320);
+});
+
+test('tutorial protects the first shift from random incidents until the player observes and intervenes', () => {
+  const state=createInitialState(()=>0,allRandomEvents);
+  assert.equal(selectOrder(state,createCampaignOrders()[0]),true);
+  state.started=true;state.paused=false;state.eventSchedule=[{id:allRandomEvents[0].id,hour:0,occurs:true}];
+  state.tasks.find(task=>task.id==='survey').enabledToday=true;
+  tickState(state,.2);
+  assert.equal(state.eventQueue.length,0);
+  assert.equal(state.activeSituations.length,0);
+});
+
+test('developing the company office spends organization cash and can visibly improve it', () => {
+  const state=createInitialState();const before=state.organization.cash;
+  const result=developHeadquarters(state,()=>0);
+  assert.equal(result.ok,true);assert.equal(result.success,true);
+  assert.equal(state.organization.cash,before-result.cost);
+  assert.equal(state.hq.level,1);
 });

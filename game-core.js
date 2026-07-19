@@ -54,6 +54,23 @@ export function settleProjectEconomy(state) {
   return settlement;
 }
 
+export function developHeadquarters(state, rng = Math.random) {
+  const organization=ensureOrganization(state);
+  state.hq??={level:0,title:'Стол у принтера',attempts:0,lastFailure:'Зато принтер греет зимой'};
+  const costs=[80,170,320,520];
+  const cost=costs[Math.min(state.hq.level,costs.length-1)];
+  if(organization.cash<cost)return {ok:false,reason:'cash',cost,...state.hq};
+  organization.cash-=cost;state.hq.attempts+=1;
+  const titles=['Стол у принтера','Кабинет без окна','Комната с фикусом','Почти настоящий офис','Офис, который не стыдно показать'];
+  const failures=['Арендодатель передумал после слова «переговорка».','Выбрали помещение. В нём уже живёт бухгалтерия.','Дизайнер потратил бюджет на мудборд из бетона.','Кресло приехало. Офис — нет.','Согласовали планировку, но не нашли вход.'];
+  const chance=Math.min(.58,.28+organization.reputation*.003);
+  const success=rng()<chance&&state.hq.level<titles.length-1;
+  if(success){state.hq.level+=1;state.hq.title=titles[state.hq.level];state.hq.lastFailure='Невероятно: улучшение пережило согласование.';}
+  else state.hq.lastFailure=failures[Math.floor(rng()*failures.length)];
+  organization.history.unshift({type:'hq',amount:cost,success,at:Date.now()});organization.history=organization.history.slice(0,30);
+  return {ok:true,success,cost,...state.hq};
+}
+
 export const TASK_BLUEPRINTS = [
   { id: 'survey', title: 'Зафиксировать состояние', short: 'Обход', skill: 'management', x: 1, y: 5, duration: 4, cost: 18, quality: 1, deps: [], priority: 3, color: '#b7c7b8' },
   { id: 'project', title: 'Выпустить рабочий проект', short: 'Проект', skill: 'design', x: 2, y: 3, duration: 12, cost: 72, quality: 5, deps: ['survey'], priority: 3, color: '#a58ae1' },
@@ -191,6 +208,7 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
       attempts: 0,
       lastFailure: 'Зато принтер греет зимой',
     },
+    tutorial:null,
     organization:{...DEFAULT_ORGANIZATION,history:[]},
     log: [],
   };
@@ -200,6 +218,12 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
 
 export function selectOrder(state, order) {
   if (!order || state.started) return false;
+  const organization=ensureOrganization(state);
+  if((order.requiresProjects??0)>organization.projectsCompleted)return false;
+  const mobilizationCost=Math.max(12,Math.min(140,Math.round(order.area/28+order.complexity*8)));
+  if(organization.cash<mobilizationCost)return false;
+  organization.cash-=mobilizationCost;
+  organization.history.unshift({type:'bid',title:order.title,amount:mobilizationCost,at:Date.now()});organization.history=organization.history.slice(0,30);
   state.selectedOrder = { ...order, tasks: undefined };
   state.phase = 'negotiation';
   state.contract = {
@@ -213,10 +237,12 @@ export function selectOrder(state, order) {
   state.finance={ledger:[{hour:0,type:'income',category:'Заказчик',amount:advance,text:`Аванс 45% · ${order.clientName}`}],contractValue:order.budget,received:advance,spent:0};
   state.quality = Math.max(66, order.finishQuality - 5);
   state.trust = order.clientType === 'state' ? 68 : 72;
-  state.tasks = buildTasksForOrder(order);
+  state.tasks = Array.isArray(order.tasks)?order.tasks.map(task=>({...task})):buildTasksForOrder(order);
   ensureMasterSchedule(state);
   state.masterScheduleAccepted=false;
   state.visualSeed = order.visualSeed;
+  state.tutorial=order.tutorial?{active:true,completed:false,chatSent:false,observedBuild:false,startedAt:Date.now()}:null;
+  state.organizationMobilization=mobilizationCost;
   state.log.push({ type: 'order', text: `Взяли заказ: ${order.title}` });
   unlockTasks(state);
   return true;
@@ -258,6 +284,7 @@ export function resolveSituation(state,situationId,choiceId,auto=false){
 }
 
 function updateSituations(state){
+  if(state.tutorial?.active&&!state.tutorial.completed)return;
   state.activeSituations??=[];state.situationCount??=0;state.nextSituationAt??=state.elapsed+2.2;
   for(const active of [...state.activeSituations])if(state.elapsed>=active.expiresAt){const template=situationById.get(active.templateId);resolveSituation(state,active.uid,template.choices.at(-1).id);state.trust=Math.max(0,state.trust-1);state.log.push({type:'risk',text:`Вопрос проигнорирован: ${template.title}`});}
   if(state.elapsed<state.nextSituationAt||state.activeSituations.length>=3)return;
@@ -404,6 +431,7 @@ export function isEventRelevant(state,event) {
 }
 
 function queueTimedEvents(state) {
+  if(state.tutorial?.active&&!state.tutorial.completed)return;
   state.eventCountsByDay??={};
   const eventDay=Math.floor(state.elapsed/24);
   const slotsUsed=()=>state.eventCountsByDay[eventDay]??0;
@@ -536,25 +564,7 @@ export function applyCatalogEventChoice(state, event, choiceId) {
 }
 
 export function attemptHqUpgrade(state, rng = Math.random) {
-  const failures = [
-    'Арендодатель передумал после слова «переговорка».',
-    'Выбрали помещение. В нём уже живёт бухгалтерия.',
-    'Дизайнер потратил бюджет на мудборд из бетона.',
-    'Кресло приехало. Офис — нет.',
-    'Согласовали планировку, но не нашли вход.',
-  ];
-  const titles = ['Стол у принтера', 'Кабинет без окна', 'Комната с фикусом', 'Почти настоящий офис'];
-  state.hq ??= { level: 0, title: titles[0], attempts: 0, lastFailure: '' };
-  state.hq.attempts += 1;
-  const success = rng() > 0.82 && state.hq.level < titles.length - 1;
-  if (success) {
-    state.hq.level += 1;
-    state.hq.title = titles[state.hq.level];
-    state.hq.lastFailure = 'Невероятно: улучшение пережило согласование.';
-  } else {
-    state.hq.lastFailure = failures[Math.floor(rng() * failures.length)];
-  }
-  return { success, ...state.hq };
+  return developHeadquarters(state,rng);
 }
 
 function updateCrewPositions(state, deltaHours) {
@@ -598,6 +608,15 @@ export function tickState(state, deltaHours) {
     const teamControl=state.team?.find(member=>member.id==='pm')?.hired?1:.72;
     task.progress += (deltaHours * crew.speed * siteDiscipline * teamControl) / task.duration;
     if (task.progress >= 1) completeTask(state, task, crew);
+  }
+
+  if(state.tutorial?.active&&!state.tutorial.completed) {
+    const physical=state.tasks.some(task=>['move','electric','prep','paint','desks'].includes(task.id)&&task.progress>.04);
+    if(physical)state.tutorial.observedBuild=true;
+    if(state.tutorial.observedBuild&&state.tutorial.chatSent&&state.tasks.some(task=>task.status==='done')) {
+      state.tutorial.completed=true;state.tutorial.active=false;
+      state.log.push({type:'done',text:'Обучение завершено. С этого момента объект имеет право удивлять.'});
+    }
   }
 
   queueTimedEvents(state);
