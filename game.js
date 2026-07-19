@@ -599,7 +599,8 @@ function renderHud() {
 function renderTutorial() {
   document.querySelectorAll('.tutorial-highlight').forEach(element=>element.classList.remove('tutorial-highlight'));
   const coach=$('#tutorialCoach');const tutorial=state.tutorial;
-  if(!tutorial?.active||tutorial.completed){coach.hidden=true;return;}
+  const tutorialSuppressed=[refs.auth,refs.menu,refs.orders,refs.result].some(modal=>modal?.classList.contains('visible'));
+  if(!tutorial?.active||tutorial.completed||tutorialSuppressed){coach.hidden=true;coach.removeAttribute('data-placement');return;}
   const pm=state.team?.find(member=>member.id==='pm')?.hired;
   const movers=state.contractors?.find(item=>item.id==='movers')?.hired;
   const enabled=state.tasks.some(task=>task.enabledToday&&!['done','active'].includes(task.status));
@@ -615,8 +616,15 @@ function renderTutorial() {
   else if(!tutorial.observedBuild)step={n:9,title:'Посмотрите, как строят',text:'Камера показывает результат буквально: материалы несут, инженерия и стены монтируются, мусор исчезает.',target:'.site-stage'};
   else if(!tutorial.chatSent){const chatOpen=refs.communication.classList.contains('visible')&&$('#communicationWindow').classList.contains('is-whatsapp');step={n:10,title:'Вмешайтесь через чат',text:chatOpen?'Выберите работу и отправьте «сделать срочно». Это стоит денег и доверия, но меняет приоритет сразу.':'Откройте чат стройки и отправьте одно срочное сообщение. Время внутри чата остановлено.',target:chatOpen?'[data-send-urgent]':'#siteWhatsappButton'};}
   else step={n:11,title:'Первый урок почти закрыт',text:'Завершите хотя бы одну работу. После этого случайные события снова получат право происходить.',target:'#taskList'};
-  $('#tutorialProgress').textContent=`ОБУЧЕНИЕ · ${step.n}/11`;$('#tutorialTitle').textContent=step.title;$('#tutorialText').textContent=step.text;coach.hidden=false;
-  document.querySelector(step.target)?.classList.add('tutorial-highlight');
+  $('#tutorialProgress').textContent=`ОБУЧЕНИЕ · ${step.n}/11`;$('#tutorialTitle').textContent=step.title;$('#tutorialText').textContent=step.text;
+  const target=document.querySelector(step.target);
+  const activeModal=[...document.querySelectorAll('.modal-backdrop.visible')].find(modal=>!modal.hidden);
+  if(activeModal&&(!target||!activeModal.contains(target))){coach.hidden=true;coach.removeAttribute('data-placement');return;}
+  coach.hidden=false;target?.classList.add('tutorial-highlight');
+  if(window.matchMedia('(max-width: 640px)').matches&&target){
+    const rect=target.getBoundingClientRect();
+    coach.dataset.placement=rect.top+rect.height/2>window.innerHeight*.52?'top':'bottom';
+  } else coach.removeAttribute('data-placement');
 }
 
 function renderAll() {
