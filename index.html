@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f1613" />
+    <meta name="description" content="FITOUT — игра про управление строительством и ремонтом офисов." />
+    <title>FITOUT — офис должен открыться в понедельник</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23ddff55'/%3E%3Cpath d='M16 18h34v9H27v8h19v9H27v12H16z' fill='%230f1613'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="FITOUT">
+          <span class="brand-mark">F</span>
+          <span class="brand-copy"><strong>FITOUT</strong><small>технический заказчик</small></span>
+        </div>
+
+        <div class="mission-label">
+          <span class="eyebrow">МИССИЯ 01</span>
+          <strong id="missionName">Выберите заказ на карте</strong>
+          <span class="location" id="missionLocation">Россия · рынок офисных проектов</span>
+        </div>
+
+        <div class="clock-controls" aria-label="Скорость игры">
+          <button class="top-schedule-button" id="topScheduleButton" type="button" title="Общий график" aria-label="Открыть общий график">▦ <span>ГРАФИК</span></button>
+          <div class="profile-chip" id="profileChip" hidden><span id="profileName"></span><button id="logoutButton" title="Выйти из профиля">↗</button></div>
+          <div class="game-clock">
+            <span id="dayLabel">ПТ · ДЕНЬ 1</span>
+            <strong id="timeLabel">09:00</strong>
+          </div>
+          <button class="icon-button" id="pauseButton" title="Пауза" aria-label="Пауза">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M17 5v14" /></svg>
+          </button>
+          <div class="speed-picker" role="group" aria-label="Скорость">
+            <button class="active" data-speed="1">1×</button>
+            <button data-speed="2">2×</button>
+            <button data-speed="4">4×</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="kpi-strip" aria-label="Показатели проекта">
+        <div class="kpi budget-kpi">
+          <span class="kpi-icon">₽</span>
+          <div><small>НА СЧЁТЕ ОБЪЕКТА</small><strong id="budgetValue">1 180 000 ₽</strong></div>
+          <span class="kpi-delta" id="budgetDelta">из 1,18 млн</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-icon deadline-icon">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>
+          </span>
+          <div><small>ДО ОТКРЫТИЯ</small><strong id="deadlineValue">4 д 0 ч</strong></div>
+          <span class="status-pill safe" id="deadlineStatus">В графике</span>
+        </div>
+        <div class="kpi quality-kpi">
+          <span class="kpi-icon quality-icon">
+            <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>
+          </span>
+          <div><small>ПРОГНОЗ КАЧЕСТВА</small><strong id="qualityValue">74 / 100</strong></div>
+          <div class="mini-meter"><i id="qualityBar"></i></div>
+        </div>
+        <div class="kpi trust-kpi">
+          <span class="client-avatar">АК</span>
+          <div><small>ДОВЕРИЕ ЗАКАЗЧИКА</small><strong id="trustValue">72%</strong></div>
+          <span class="kpi-delta" id="clientKpi">Заказчик не выбран</span>
+        </div>
+      </section>
+
+      <main class="game-layout">
+        <aside class="left-panel panel">
+          <div class="panel-heading">
+            <div><span class="eyebrow">ОБЪЕКТ</span><h2>Чек-лист работ</h2></div>
+            <span class="counter" id="taskCounter">0 / 8</span>
+          </div>
+          <div class="progress-line"><i id="missionProgress"></i></div>
+          <p class="panel-hint" id="taskPanelHint">Здесь видно, что идёт, сколько сделано и где уже появилась проблема.</p>
+          <div class="task-list" id="taskList"></div>
+          <button class="secondary-button full schedule-button" id="masterScheduleButton">▦ Открыть общий график</button>
+          <button class="secondary-button full" id="resetButton">
+            <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6"/></svg>
+            Начать миссию заново
+          </button>
+        </aside>
+
+        <section class="site-stage" aria-label="Игровое поле — офис">
+          <canvas id="siteCanvas" aria-label="Изометрический план офиса"></canvas>
+          <div class="site-topline">
+            <div class="live-chip"><i></i><span id="siteStatus">Объект принят</span></div>
+            <div class="view-actions">
+              <button class="site-pause-button" id="sitePauseButton" title="Пауза на объекте" aria-label="Пауза на объекте">Ⅱ <span>ПАУЗА</span></button>
+              <button id="zoomOut" title="Уменьшить" aria-label="Уменьшить">−</button>
+              <button id="zoomReset" title="Вернуть масштаб" aria-label="Вернуть масштаб">
+                <svg viewBox="0 0 24 24"><path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4"/></svg>
+              </button>
+              <button id="zoomIn" title="Увеличить" aria-label="Увеличить">+</button>
+            </div>
+          </div>
+          <div class="room-legend" aria-hidden="true">
+            <span><i class="work-dot"></i>Работа</span>
+            <span><i class="crew-dot"></i>Бригада</span>
+            <span><i class="done-dot"></i>Готово</span>
+          </div>
+          <div class="selection-card" id="selectionCard" hidden></div>
+          <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+        </section>
+
+        <aside class="right-panel panel">
+          <div class="panel-heading compact communication-panel-heading">
+            <div><span class="eyebrow">УПРАВЛЕНИЕ</span><h2>Связь с объектом</h2></div>
+            <span class="online-dot" title="Объект на связи"></span>
+          </div>
+          <p class="panel-hint">После планёрки влиять на стройку можно сообщениями, письмами и через команду.</p>
+          <nav class="management-menu" aria-label="Каналы управления объектом">
+            <button class="management-card whatsapp" id="siteWhatsappButton" type="button"><span class="management-icon">◉</span><span><strong>Чат стройки</strong><small>Сделать срочно · уточнить статус</small></span><b>→</b></button>
+            <button class="management-card outlook" id="siteEmailButton" type="button"><span class="management-icon">✉</span><span><strong>Почта</strong><small>Резерв · решение · претензия</small></span><b>→</b></button>
+            <button class="management-card team" id="teamButton" type="button"><span class="management-icon">♟</span><span><strong>Команда</strong><small>Свои люди и подрядчики</small></span><b>→</b></button>
+            <div class="management-tools">
+              <button id="financeButton" type="button"><span>₽</span>Деньги</button>
+              <button id="docsButton" type="button"><span>▤</span>Документы</button>
+              <button class="save-exit-button" id="saveExitButton" type="button"><span>↙</span>Сохранить и выйти в меню</button>
+            </div>
+          </nav>
+          <div class="contractor-list" id="contractorList" hidden></div>
+          <div class="crew-section">
+            <div class="subheading"><span>СЕЙЧАС НА ОБЪЕКТЕ</span><strong id="crewCount">1 человек</strong></div>
+            <div class="crew-list" id="crewList"></div>
+          </div>
+        </aside>
+      </main>
+
+      <footer class="statusbar">
+        <div class="objective"><span>ЦЕЛЬ</span><strong id="objectiveText">Найти заказ, который выглядит выполнимым</strong></div>
+        <div class="risk" id="riskLine"><span>РИСК</span><strong>Нет маляров — отделка не начнётся</strong></div>
+        <div class="footer-actions">
+          <button class="channel-button whatsapp" id="whatsappButton"><span><svg viewBox="0 0 24 24"><path d="M20 11.6a8 8 0 0 1-11.8 7L4 20l1.4-4A8 8 0 1 1 20 11.6Z"/><path d="M9 8.5c.4 2.6 2.1 4.3 4.7 4.9l1.1-1.1 2 .9c-.2 1.5-1.1 2.2-2.5 2.1-4.4-.5-7.1-3.2-7.5-7.5-.1-1.3.6-2.2 2-2.4l1 2Z"/></svg></span>Чат стройки</button>
+          <button class="channel-button outlook" id="emailButton"><span><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg></span>Почта</button>
+          <button class="primary-button" id="briefButton">Бриф</button>
+        </div>
+      </footer>
+    </div>
+
+    <div class="modal-backdrop visible" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+      <section class="auth-modal">
+        <div class="auth-visual auth-cover" aria-hidden="true">
+          <div class="auth-cover-title"><span>F</span><strong>FITOUT<br>SIMULATOR</strong><small>Офис должен открыться в понедельник</small></div>
+          <p>Клиентам строим офисы.<br>Себе пока заводим аккаунт.</p>
+        </div>
+        <form class="auth-form" id="authForm">
+          <span class="eyebrow">FITOUT · ПРОФИЛЬ ТЕХЗАКАЗЧИКА</span>
+          <h1 id="authTitle">Сначала представьтесь</h1>
+          <p>Профиль хранит текущий объект и историю прохождений. Заказчики забудут обещания, сервер — нет.</p>
+          <label>ИМЯ ИГРОКА<input id="authName" name="username" autocomplete="username" minlength="2" maxlength="28" placeholder="Например, Прораб_77" required></label>
+          <label>ПАРОЛЬ<input id="authPassword" name="password" type="password" autocomplete="current-password" minlength="4" maxlength="72" placeholder="Не «1234», хотя мы не заказчик" required></label>
+          <div class="auth-message" id="authMessage" aria-live="polite"></div>
+          <button class="primary-button hero-button" id="loginButton" type="submit">Войти и продолжить <span>→</span></button>
+          <button class="secondary-button auth-register" id="registerButton" type="button">Создать нового игрока</button>
+          <small>Сохранения синхронизируются с VPS. В браузере остаётся резервная копия.</small>
+        </form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="mainMenuModal" role="dialog" aria-modal="true" aria-labelledby="mainMenuTitle">
+      <section class="main-menu-modal">
+        <div class="main-menu-art" aria-hidden="true">
+          <div class="auth-cover-title"><span>F</span><strong>FITOUT<br>SIMULATOR</strong><small>Офис должен открыться в понедельник</small></div>
+        </div>
+        <div class="main-menu-actions">
+          <span class="eyebrow">ПРОФИЛЬ <b id="menuProfileName">ИГРОК</b></span>
+          <h1 id="mainMenuTitle">Что строим сегодня?</h1>
+          <p id="continueSummary">Сохранённого объекта пока нет. Это самый спокойный момент вашей карьеры.</p>
+          <section class="organization-card" aria-label="Экономика организации">
+            <header><span><small>ВАША ОРГАНИЗАЦИЯ</small><strong id="organizationName">ООО «Потом согласуем»</strong></span><b id="organizationCash">320 000 ₽</b></header>
+            <div class="organization-metrics"><span><small>ДОЛГ</small><b id="organizationDebt">0 ₽</b></span><span><small>ПРОЕКТЫ</small><b id="organizationProjects">0</b></span><span><small>РЕПУТАЦИЯ</small><b id="organizationReputation">50</b></span></div>
+            <div class="loan-actions"><span>Не хватает оборотки?</span><button type="button" data-loan="300">Кредит 300К · 16%</button><button type="button" data-loan="800">Кредит 800К · 22%</button></div>
+          </section>
+          <nav class="source-links" aria-label="Материалы об офисах"><a href="https://www.youtube.com/@Olsedmi" target="_blank" rel="noreferrer">▶ YouTube · Офисная среда</a><a href="https://t.me/all_about_offices" target="_blank" rel="noreferrer">➤ Telegram · Всё об офисах</a></nav>
+          <button class="primary-button menu-button" id="continueGameButton" type="button"><span><b>Продолжить</b><small>Вернуться на текущий объект</small></span><strong>→</strong></button>
+          <button class="secondary-button menu-button" id="newGameButton" type="button"><span><b>Новая игра</b><small>Сгенерировать новый рынок заказов</small></span><strong>＋</strong></button>
+          <small>Прогресс сохраняется автоматически в вашем профиле.</small>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="ordersModal" role="dialog" aria-modal="true" aria-labelledby="ordersTitle">
+      <section class="orders-modal">
+        <div class="orders-map-panel">
+          <div class="orders-heading">
+            <div><span class="eyebrow">ГЛОБАЛЬНАЯ КАРТА</span><h1 id="ordersTitle">Где сегодня строим?</h1></div>
+            <button class="secondary-button" id="regenerateOrders">Обновить рынок · бесплатно пока</button>
+          </div>
+          <p>Выберите заказ. Сложность — не рейтинг привлекательности, а количество способов всё переделать дважды.</p>
+          <div class="orders-map" id="ordersMap" aria-label="Карта заказов">
+            <span class="map-land land-west"></span><span class="map-land land-east"></span>
+            <span class="map-route route-one"></span><span class="map-route route-two"></span>
+            <div id="orderPins"></div>
+          </div>
+          <div class="order-filter-note"><i></i> Коммерция отвечает быстро, но передумывает. Государство отвечает медленно, зато на бумаге.</div>
+        </div>
+        <aside class="order-inspector" id="orderInspector">
+          <span class="eyebrow">ДОСЬЕ ЗАКАЗА</span>
+          <div id="orderDetails"></div>
+          <button class="primary-button hero-button" id="acceptOrder">Вести переговоры <span>→</span></button>
+        </aside>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="briefModal" role="dialog" aria-modal="true" aria-labelledby="briefTitle">
+      <section class="mission-modal">
+        <button class="modal-close" data-close-modal aria-label="Закрыть">×</button>
+        <div class="mission-visual">
+          <div class="building-stack" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <span class="chapter">ГЛАВА 1 · МАЛЫЕ РАБОТЫ</span>
+        </div>
+        <div class="mission-copy">
+          <span class="eyebrow">НОВЫЙ ЗАКАЗ</span>
+          <h1 id="briefTitle">Офис должен открыться в понедельник</h1>
+          <p id="briefDescription">Команда переезжает в новый офис. Нужно провести работы и сдать помещение — без права превратить график в жанр фантастики.</p>
+          <p class="market-thesis">Офис здесь — не склад «попо-часов», а место для идей, встреч и переключения режимов. Красивый рендер не считается готовым объектом.</p>
+          <div class="client-quote">
+            <span class="client-avatar large">АК</span>
+            <blockquote><span id="clientQuote">«Красиво — да. Но главное: люди должны сесть и работать. Бюджет согласован, сюрпризы — нет.»</span><cite id="clientCitation">Анна Крылова · генеральный директор</cite></blockquote>
+          </div>
+          <div class="contract-grid">
+            <div><small>БЮДЖЕТ</small><strong id="contractBudget">1,18 млн ₽</strong></div>
+            <div><small>СРОК</small><strong id="contractDeadline">72 часа · до пн</strong></div>
+            <div><small>КАЧЕСТВО</small><strong id="contractQuality">не ниже 78</strong></div>
+          </div>
+          <ul class="brief-goals">
+            <li><i>1</i> Наймите нужные бригады</li>
+            <li><i>2</i> Расставьте приоритеты</li>
+            <li><i>3</i> Реагируйте на события заказчика</li>
+          </ul>
+          <div class="negotiation-panel" id="negotiationPanel">
+            <div class="subheading"><span>ВАШ ХОД · СЫГРАЙТЕ 2 КАРТЫ</span><strong id="cardsPlayed">0 / 2</strong></div>
+            <div class="contract-deck" id="contractDeck"></div>
+          </div>
+          <button class="primary-button hero-button" id="startMission" disabled>Сначала договоритесь <span>→</span></button>
+          <a class="source-credit" href="https://www.youtube.com/@Olsedmi" target="_blank" rel="noreferrer">Материалы рынка: канал «Офисная среда» / Olsedmi ↗</a>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="marketModal" role="dialog" aria-modal="true" aria-labelledby="marketTitle">
+      <section class="market-modal">
+        <div class="market-map">
+          <span class="eyebrow">ПОДГОТОВКА ОБЪЕКТА</span>
+          <h2 id="marketTitle">Соберите контур управления</h2>
+          <p>Подрядчики дают руки. Собственная команда даёт им порядок, контроль и память.</p>
+          <div class="map-grid" id="mapGrid"></div>
+        </div>
+        <div class="market-roster">
+          <div class="subheading"><span>ВАША КОМАНДА</span><strong id="prepBudget"></strong></div>
+          <div id="teamPicker" class="team-picker"></div>
+          <div class="subheading"><span>ПОДРЯДЧИКИ</span><strong>выход на объект</strong></div>
+          <div id="mapContractors" class="map-contractors"></div>
+          <button class="primary-button hero-button" id="enterSite">Выйти на объект <span>→</span></button>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="planningModal" role="dialog" aria-modal="true" aria-labelledby="planningTitle">
+      <section class="planning-modal">
+        <span class="eyebrow">УТРЕННЯЯ ПЛАНЁРКА</span>
+        <h2 id="planningTitle">Что сегодня действительно важно?</h2>
+        <p>Выберите работы дня и расставьте приоритеты. После запуска смены останутся только сообщения и письма.</p>
+        <div class="day-plan-list" id="dayPlanList"></div>
+        <button class="primary-button hero-button" id="startDay">Отправить план бригадам <span>→</span></button>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="scheduleModal" role="dialog" aria-modal="true" aria-labelledby="scheduleTitle">
+      <section class="schedule-modal">
+        <button class="modal-close" id="closeSchedule" aria-label="Закрыть общий график">×</button>
+        <div class="schedule-heading"><div><span class="eyebrow">БАЗОВЫЙ ПЛАН ПРОЕКТА</span><h2 id="scheduleTitle">Общий график строительства</h2><p>График рассчитан по зависимостям. Можно принять его или сдвинуть работу по дню и очереди.</p></div><div class="schedule-legend"><span><i class="design"></i>Проект</span><span><i class="build"></i>Стройка</span><span><i class="handover"></i>Сдача</span></div></div>
+        <div class="schedule-calendar" id="scheduleCalendar"></div>
+        <div class="schedule-actions"><span id="scheduleWarning">Изменения сразу попадут в утренние планёрки.</span><button class="primary-button" id="acceptSchedule">Принять общий график →</button></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="communicationModal" role="dialog" aria-modal="true" aria-labelledby="communicationTitle">
+      <section class="communication-modal" id="communicationWindow">
+        <button class="modal-close" id="closeCommunication" aria-label="Закрыть">×</button>
+        <div class="communication-heading">
+          <span class="event-kicker" id="communicationKicker">WHATSAPP · ОБЪЕКТ</span>
+          <h2 id="communicationTitle">Вмешаться в работу</h2>
+          <p id="communicationText">Срочное сообщение может переставить приоритет, но разрушает утренний план и доверие к нему.</p>
+        </div>
+        <div class="communication-actions" id="communicationActions"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="reportModal" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+      <section class="report-modal">
+        <div class="report-heading"><div><span class="eyebrow">18:00 · ОБЯЗАТЕЛЬНАЯ ОТЧЁТНОСТЬ</span><h2 id="reportTitle">График, который всё объясняет</h2></div><span class="excel-badge">X</span></div>
+        <p>Сначала проверьте план/факт. Затем отправьте таблицу, настолько большую, чтобы никто не решился её оспаривать.</p>
+        <div class="excel-toolbar"><span>Файл</span><span>Главная</span><span>Вставка</span><span>Формулы</span><span>Данные</span><b>Σ АВТОСУММА</b></div>
+        <div class="excel-sheet"><table><thead><tr><th>№</th><th>WBS</th><th>Работа / микроподзадача</th><th>План, ч</th><th>Факт, ч</th><th>Δ</th><th>Статус</th><th>Ответственный</th><th>Комментарий</th></tr></thead><tbody id="reportRows"></tbody></table></div>
+        <div class="report-footer"><span id="reportSummary"></span><button class="primary-button" id="sendReport">Отправить «ОТЧЁТ_финал_v7_точно.xlsx»</button></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="teamModal" role="dialog" aria-modal="true" aria-labelledby="teamTitle">
+      <section class="sidebook-modal">
+        <button class="modal-close" data-close-sidebook aria-label="Закрыть">×</button>
+        <span class="eyebrow">ЛЮДИ ПРОЕКТА</span><h2 id="teamTitle">Команда и подрядчики</h2>
+        <p>Собственная команда управляет. Подрядчики делают. Если первые исчезнут, вторые немедленно найдут удобную себе работу.</p>
+        <div class="sidebook-list" id="teamBook"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="financeModal" role="dialog" aria-modal="true" aria-labelledby="financeTitle">
+      <section class="sidebook-modal finance-modal">
+        <button class="modal-close" data-close-sidebook aria-label="Закрыть">×</button>
+        <span class="eyebrow">ДЕНЕЖНЫЙ ПОТОК</span><h2 id="financeTitle">Платить приходится сегодня</h2>
+        <p>Заказчик платит аванс и этапы. Вы платите материалы, мобилизацию, зарплаты и ежедневное существование объекта.</p>
+        <div class="finance-kpis" id="financeKpis"></div><div class="cash-ledger" id="cashLedger"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="docsModal" role="dialog" aria-modal="true" aria-labelledby="docsTitle">
+      <section class="sidebook-modal docs-modal">
+        <button class="modal-close" data-close-sidebook aria-label="Закрыть">×</button>
+        <span class="eyebrow">КОМПЛЕКТ ДОКУМЕНТАЦИИ</span><h2 id="docsTitle">Проект и исполнительная</h2>
+        <p>Проект должен опережать стройку. Исполнительная — догонять её по пятам, а не вспоминаться перед приёмкой.</p>
+        <div class="drawing-board" id="drawingBoard"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="eventModal" role="dialog" aria-modal="true" aria-labelledby="eventTitle">
+      <section class="event-modal">
+        <span class="event-kicker" id="eventKicker">ЗАПРОС ЗАКАЗЧИКА</span>
+        <h2 id="eventTitle">Изменение по ходу работ</h2>
+        <p id="eventText"></p>
+        <div class="event-options" id="eventOptions"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="situationModal" role="dialog" aria-modal="true" aria-labelledby="situationTitle">
+      <section class="event-modal situation-modal">
+        <button class="modal-close" id="closeSituation" aria-label="Закрыть">×</button>
+        <span class="event-kicker">ВОПРОС С ПЛОЩАДКИ · !</span>
+        <h2 id="situationTitle">Нужно ваше решение</h2><p id="situationText"></p>
+        <div class="event-options" id="situationOptions"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="resultModal" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+      <section class="result-modal">
+        <span class="result-seal" id="resultSeal">A</span>
+        <span class="eyebrow">МИССИЯ ЗАВЕРШЕНА</span>
+        <h2 id="resultTitle">Офис принят</h2>
+        <p id="resultText"></p>
+        <div class="result-stats" id="resultStats"></div>
+        <button class="primary-button" id="playAgain">Вернуться в офис компании</button>
+      </section>
+    </div>
+
+    <script type="module" src="game.js"></script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+data/
+assets/fitout-cover-v1.png
+.DS_Store
