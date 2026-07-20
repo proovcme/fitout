@@ -6,6 +6,7 @@ import {
   addPortfolioProject,
   advanceCompanyDay,
   assignEmployee,
+  calculateProductionDelta,
   companyCashForecast,
   createChangeOrder,
   createMaterialOrder,
@@ -67,6 +68,12 @@ test('change orders alter real scope, contract and financing',()=>{
 
 test('delegated background projects advance while the opened project remains untouched',()=>{
   const root=projectState(61);const backgroundState=projectState(62);addPortfolioProject(root,backgroundState,'autonomous');const background=root.portfolio.projects.find(project=>project.id!==root.portfolio.activeProjectId);setProjectDelegation(root,background.id,'autonomous');background.snapshot.started=true;background.snapshot.paused=false;for(const task of background.snapshot.tasks)task.enabledToday=true;const before=background.summary.progress;const activeElapsed=root.elapsed;const result=simulatePortfolioDay(root);assert.equal(result.length,1);assert.ok(background.summary.progress>=before);assert.equal(root.elapsed,activeElapsed);
+});
+
+test('manual and background simulation share one production-rate formula',()=>{
+  const factors={hours:3,duration:12,speed:1.1,discipline:.8,control:.9,occupancy:.82,mismatch:.55,pressure:1.2,presence:1.18,crowding:.88,manpower:1.06,cleanup:.92};
+  const expected=Object.entries(factors).filter(([key])=>!['hours','duration'].includes(key)).reduce((value,[,factor])=>value*factor,factors.hours)/factors.duration;
+  assert.equal(calculateProductionDelta(factors),expected);
 });
 
 test('headquarters improvement is a multi-day internal project',()=>{

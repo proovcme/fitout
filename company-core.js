@@ -17,6 +17,10 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const projectIdOf=(state)=>state.selectedOrder?.id??`project-${state.visualSeed??Date.now()}`;
 const dayRoll=(day,salt=0)=>{const value=Math.sin((day+1)*12.9898+salt*78.233)*43758.5453;return value-Math.floor(value);};
 
+export function calculateProductionDelta({hours=0,duration=1,speed=1,discipline=1,control=1,occupancy=1,mismatch=1,pressure=1,presence=1,crowding=1,manpower=1,cleanup=1}={}){
+  return Math.max(0,hours)*speed*discipline*control*occupancy*mismatch*pressure*presence*crowding*manpower*cleanup/Math.max(1,duration);
+}
+
 function defaultCompany(legacy={}){
   return {
     ...clone(legacy),
@@ -229,7 +233,7 @@ function simulateBackgroundProject(state,project,hours=9){
   const snapshot=project.snapshot;if(!snapshot.started||snapshot.completed)return {progress:0,completed:false};backgroundUnlock(snapshot);
   const manager=state.staff.employees.find(item=>item.id===project.managerEmployeeId);const assigned=state.staff.employees.filter(item=>(project.staffIds??[]).includes(item.id)&&item.status==='employed');const management=(manager?.competence??35)/100;const mode=project.delegation?.mode??'supervised';const capacity=mode==='autonomous'?3:mode==='supervised'?2:1;const ready=(snapshot.tasks??[]).filter(task=>task.status==='ready').sort((a,b)=>(b.priority??1)-(a.priority??1)).slice(0,capacity);
   for(const task of ready)task.status='active';const active=(snapshot.tasks??[]).filter(task=>task.status==='active');const attention=Math.max(.45,Math.min(1.25,.62+management*.45+assigned.length*.06));let delta=0;
-  for(const task of active){const before=task.progress??0;task.progress=clamp(before+hours*attention/Math.max(4,task.duration),0,1);delta+=task.progress-before;if(task.progress>=1){const acceptance=.45+management*.35+assigned.some(employee=>employee.roleId==='pto')*.12;if(mode!=='manual'&&dayRoll(state.companyCalendar.day,task.id.length)<acceptance){task.status='done';snapshot.quality=clamp((snapshot.quality??70)+(task.quality??1)*.4,0,100);const value=Math.max(8,Math.round(task.cost*1.15));createObligation(state,{direction:'receivable',kind:'stage-payment',amount:value,projectId:project.id,counterparty:snapshot.selectedOrder?.client??'Заказчик',dueDay:state.companyCalendar.day+2+Math.floor(dayRoll(state.companyCalendar.day,value)*5),text:`Принято: ${task.title}`});}else task.status='awaiting';}}
+  for(const task of active){const before=task.progress??0;task.progress=clamp(before+calculateProductionDelta({hours,duration:Math.max(4,task.duration),speed:attention}),0,1);delta+=task.progress-before;if(task.progress>=1){const acceptance=.45+management*.35+assigned.some(employee=>employee.roleId==='pto')*.12;if(mode!=='manual'&&dayRoll(state.companyCalendar.day,task.id.length)<acceptance){task.status='done';snapshot.quality=clamp((snapshot.quality??70)+(task.quality??1)*.4,0,100);const value=Math.max(8,Math.round(task.cost*1.15));createObligation(state,{direction:'receivable',kind:'stage-payment',amount:value,projectId:project.id,counterparty:snapshot.selectedOrder?.client??'Заказчик',dueDay:state.companyCalendar.day+2+Math.floor(dayRoll(state.companyCalendar.day,value)*5),text:`Принято: ${task.title}`});}else task.status='awaiting';}}
   backgroundUnlock(snapshot);snapshot.elapsed=(snapshot.elapsed??0)+hours;snapshot.budget-=Math.max(4,Math.round(active.length*5+assigned.length*2));if((snapshot.tasks??[]).every(task=>['done','skipped'].includes(task.status)))snapshot.completed=true;project.summary=projectSummary(project);return {progress:delta,completed:snapshot.completed};
 }
 

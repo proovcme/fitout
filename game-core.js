@@ -2,7 +2,7 @@ import { buildTasksForOrder } from './order-generator.js';
 import { generateAmbientBeat, generateSiteLine } from './procedural-content.js';
 import { SITUATIONS, situationById } from './situations.js';
 import { randomEventById } from './events/index.js';
-import { activatePortfolioProject, ensureGameSaveV2, postLedgerEntry, syncActiveProjectToPortfolio } from './company-core.js';
+import { activatePortfolioProject, calculateProductionDelta, ensureGameSaveV2, postLedgerEntry, syncActiveProjectToPortfolio } from './company-core.js';
 
 export const INITIAL_BUDGET = 1180;
 export const DEADLINE_HOURS = 72;
@@ -1067,7 +1067,7 @@ export function tickState(state, deltaHours) {
     const occupiedPenalty=state.selectedOrder?.occupiedOffice?.82:1;const mismatchPenalty=task.profileMismatch?.55:1;const pressure=state.elapsed<(task.pressureUntil??0)?(task.pressureFactor??1):1;const playerPresence=state.playerZoneTaskId===task.id?1.18:1;const crowdingPenalty=(state.siteCongestion?.penalty??1)*localCrowdingPenalty(state,task);
     const baseManpower=Math.max(1,crew.baseManpower??crewHeadcount(state,crew));const actualManpower=crewHeadcount(state,crew);const manpowerFactor=THREELESS_CLAMP(1+(actualManpower-baseManpower)*(actualManpower>=baseManpower?.06:.075),.65,1.3);
     const cleanupDistraction=task.skill==='cleaning'||NON_PHYSICAL_TASKS.has(task.id)?1:cleanliness.distraction*(state.skippedTempoFactor??1);
-    task.progress += (deltaHours * crew.speed * siteDiscipline * teamControl * occupiedPenalty * mismatchPenalty * pressure * playerPresence * crowdingPenalty * manpowerFactor * cleanupDistraction) / task.duration;
+    task.progress += calculateProductionDelta({hours:deltaHours,duration:task.duration,speed:crew.speed,discipline:siteDiscipline,control:teamControl,occupancy:occupiedPenalty,mismatch:mismatchPenalty,pressure,presence:playerPresence,crowding:crowdingPenalty,manpower:manpowerFactor,cleanup:cleanupDistraction});
     if (task.progress >= 1) completeTask(state, task, crew);
   }
 
