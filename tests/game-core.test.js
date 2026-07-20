@@ -229,6 +229,12 @@ test('legacy project finance separates client payments from borrowed money',()=>
   const finance=ensureProjectFinance(state);assert.equal(finance.received,450);assert.equal(finance.totalIncome,750);assert.equal(finance.advanceReceived,450);
 });
 
+test('legacy accepted work receives one catch-up payment without being paid twice',()=>{
+  const state=createInitialState();state.budget=25;state.tasks.find(item=>item.id==='survey').status='done';state.finance={contractValue:1000,received:750,spent:90,ledger:[{type:'income',category:'Заказчик',amount:450},{type:'income',category:'Кредит организации',amount:300}]};
+  const finance=ensureProjectFinance(state);assert.ok(finance.migrationAdjustment>0);assert.equal(state.budget,25+finance.migrationAdjustment);const received=finance.received;const budget=state.budget;
+  ensureProjectFinance(state);assert.equal(finance.received,received);assert.equal(state.budget,budget);assert.equal(finance.ledger.filter(row=>row.text==='Перерасчёт ранее принятых работ').length,1);
+});
+
 test('organization carries project profit and interest-bearing debt between projects', () => {
   const state=createInitialState();
   const loan=takeOrganizationLoan(state,300);

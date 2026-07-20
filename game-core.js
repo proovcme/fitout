@@ -18,6 +18,7 @@ const CLIENT_PAYMENT_CATEGORIES = new Set([
   'Финальное закрытие',
   'Порешали с финансированием',
 ]);
+const PROJECT_FINANCE_RECONCILIATION_VERSION = 1;
 
 const DEFAULT_ORGANIZATION = {
   name:'ООО «Потом согласуем»',
@@ -97,6 +98,20 @@ export function ensureProjectFinance(state) {
   }
   finance.totalIncome=Math.max(finance.received,Number(finance.totalIncome)||0);
   finance.advanceReceived=Math.min(finance.received,Math.max(0,Number(finance.advanceReceived)||0));
+  if(finance.reconciliationVersion!==PROJECT_FINANCE_RECONCILIATION_VERSION&&Array.isArray(state.tasks)) {
+    const contractValue=Math.max(0,finance.contractValue??0);const retention=Math.round(contractValue*.15);
+    const payableTasks=state.tasks.filter(item=>!item.reworkOf&&!['executive-docs','inspect'].includes(item.id)&&item.status!=='skipped');
+    const totalWeight=payableTasks.reduce((sum,item)=>sum+Math.max(1,item.cost??1),0);const stagePool=Math.max(0,contractValue-retention-finance.advanceReceived);
+    const earnedStage=payableTasks.filter(item=>item.status==='done').reduce((sum,item)=>sum+(totalWeight?Math.round(stagePool*Math.max(1,item.cost??1)/totalWeight):0),0);
+    const alreadyPaidStage=Math.max(0,finance.received-finance.advanceReceived);const available=Math.max(0,contractValue-retention-finance.received);
+    const catchupPayment=Math.min(available,Math.max(0,earnedStage-alreadyPaidStage));
+    if(catchupPayment>0) {
+      state.budget=(state.budget??0)+catchupPayment;finance.received+=catchupPayment;finance.totalIncome+=catchupPayment;
+      finance.ledger.unshift({hour:state.elapsed??0,type:'income',category:'Этапный платёж',amount:Math.round(catchupPayment),text:'Перерасчёт ранее принятых работ'});finance.ledger=finance.ledger.slice(0,80);
+      finance.migrationAdjustment=(finance.migrationAdjustment??0)+catchupPayment;
+    }
+    finance.reconciliationVersion=PROJECT_FINANCE_RECONCILIATION_VERSION;
+  }
   return finance;
 }
 
@@ -410,7 +425,7 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     tasks: TASK_BLUEPRINTS.map((task) => ({ ...task, progress: 0, status: 'locked', crewId: null, committed: false })),
     contractors: createContractorMarket(),
     team: TEAM_BLUEPRINTS.map((member)=>({...member,hired:false})),
-    finance:{ledger:[{hour:0,type:'income',category:'Аванс',amount:INITIAL_BUDGET,text:'Стартовое финансирование'}],contractValue:INITIAL_BUDGET,received:INITIAL_BUDGET,totalIncome:INITIAL_BUDGET,advanceReceived:INITIAL_BUDGET,spent:0,accountingVersion:PROJECT_FINANCE_ACCOUNTING_VERSION},
+    finance:{ledger:[{hour:0,type:'income',category:'Аванс',amount:INITIAL_BUDGET,text:'Стартовое финансирование'}],contractValue:INITIAL_BUDGET,received:INITIAL_BUDGET,totalIncome:INITIAL_BUDGET,advanceReceived:INITIAL_BUDGET,spent:0,accountingVersion:PROJECT_FINANCE_ACCOUNTING_VERSION,reconciliationVersion:PROJECT_FINANCE_RECONCILIATION_VERSION},
     crews: [
       { id: 'foreman', name: 'Вы', role: 'Генеральный директор', skill: 'management', color: '#ddff55', initials: 'ГД', speed: .7, quality: .92, taskId: null, x: 4, y: 6, state: 'idle' },
       { id: 'general-crew', name: 'Хозбригада «Сами справимся»', role: 'Универсальная штатная бригада', skill: 'general', color: '#9aa89d', initials: 'ХБ', speed: .52, quality: .78, manpower:4, taskId: null, x: 7, y: 7, state: 'idle',level:1 },
@@ -476,7 +491,7 @@ export function selectOrder(state, order) {
   };
   const advance=Math.round(order.budget*.45);
   state.budget = advance;
-  state.finance={ledger:[{hour:0,type:'income',category:'Заказчик',amount:advance,text:`Аванс 45% · ${order.clientName}`}],contractValue:order.budget,received:advance,totalIncome:advance,advanceReceived:advance,spent:0,accountingVersion:PROJECT_FINANCE_ACCOUNTING_VERSION};
+  state.finance={ledger:[{hour:0,type:'income',category:'Заказчик',amount:advance,text:`Аванс 45% · ${order.clientName}`}],contractValue:order.budget,received:advance,totalIncome:advance,advanceReceived:advance,spent:0,accountingVersion:PROJECT_FINANCE_ACCOUNTING_VERSION,reconciliationVersion:PROJECT_FINANCE_RECONCILIATION_VERSION};
   state.quality = Math.max(66, order.finishQuality - 5);
   state.trust = order.clientType === 'state' ? 68 : 72;
   state.tasks = Array.isArray(order.tasks)?order.tasks.map(task=>({...task})):buildTasksForOrder(order);
