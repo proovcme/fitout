@@ -40,5 +40,5 @@ test('site animation time advances only while the simulation is unpaused',()=>{
 test('assigned permanent staff are mirrored into the active 3D site',()=>{
   assert.match(script,/function syncAssignedStaffToActiveProject\(\)/);
   assert.match(script,/const crewId=`company-\$\{employee\.id\}`/);
-  assert.match(script,/syncAssignedStaffToActiveProject\(\);\s+renderOrders/);
+  assert.match(script,/syncAssignedStaffToActiveProject\(\);\s+unlockTasks\(state\);\s+renderOrders/);
 });

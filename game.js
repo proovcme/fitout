@@ -644,7 +644,10 @@ function renderDocsBook() {
 function taskProblem(task) {
   if(task.status==='awaiting')return 'Физически готово, но этапных денег ещё нет — предъявите заказчику';
   if(task.reworkOf)return 'Переделка из-за неверной последовательности работ';
-  if(task.status==='blocked')return `Не хватает ${Math.max(0,task.cost-state.budget)} тыс. ₽ на запуск`;
+  if(task.status==='blocked'){
+    const shortage=Math.max(0,Math.ceil((task.cost-state.budget)*10)/10);
+    return shortage>0?`Не хватает ${shortage.toLocaleString('ru-RU')} тыс. ₽ на запуск`:'Финансирование уже поступило — работа возвращается в очередь';
+  }
   const activeQuestion=(state.activeSituations??[]).find(item=>item.crewId===task.crewId);
   if(activeQuestion)return situationById.get(activeQuestion.templateId)?.title??'Бригада ждёт решения';
   const crew=task.crewId?state.crews.find(item=>item.id===task.crewId):null;
@@ -841,6 +844,7 @@ function renderTutorial() {
 
 function renderAll() {
   syncAssignedStaffToActiveProject();
+  unlockTasks(state);
   renderOrders();
   if(state.selectedOrder)renderNegotiation();
   renderHud();

@@ -463,7 +463,11 @@ export function selectOrder(state, order) {
 
 export function unlockTasks(state) {
   for (const task of state.tasks) {
-    if (task.status === 'done' || task.status === 'skipped' || task.status === 'active' || task.status === 'blocked' || task.status === 'awaiting') continue;
+    if (task.status === 'done' || task.status === 'skipped' || task.status === 'active' || task.status === 'awaiting') continue;
+    if(task.status==='blocked'){
+      if(!task.committed&&state.budget+1e-6<task.cost)continue;
+      task.status='ready';
+    }
     if(!state.started){task.status=task.id==='survey'?'ready':'locked';continue;}
     if(task.id==='inspect') {
       task.status=state.tasks.filter(item=>item.id!=='inspect').every(item=>['done','skipped'].includes(item.status))?'ready':'locked';
@@ -645,7 +649,7 @@ export function forceAssignCrew(state,crewId,taskId) {
   if(!crew||!task||!['ready','locked'].includes(task.status)||(crew.unavailableUntil??0)>state.elapsed)return {ok:false,reason:'unavailable'};
   if(task.crewId&&task.crewId!==crew.id)return {ok:false,reason:'occupied'};
   if(crew.taskId){const previous=state.tasks.find(item=>item.id===crew.taskId);if(previous&&previous.status==='active'){previous.status='ready';previous.crewId=null;}}
-  if(!task.committed){if(state.budget<task.cost)return {ok:false,reason:'budget'};state.budget-=task.cost;recordCash(state,'expense','Работы',task.cost,`Ручной нагон: ${task.title}`);task.committed=true;}
+  if(!task.committed){if(state.budget+1e-6<task.cost)return {ok:false,reason:'budget'};state.budget=Math.max(0,state.budget-task.cost);recordCash(state,'expense','Работы',task.cost,`Ручной нагон: ${task.title}`);task.committed=true;}
   task.status='active';task.enabledToday=true;task.crewId=crew.id;task.profileMismatch=crew.skill!==task.skill;task.manualAssignment=true;crew.taskId=task.id;crew.state='working';
   state.log.push({type:task.profileMismatch?'risk':'start',text:`${crew.name} переброшены на «${task.short}»${task.profileMismatch?' не по профилю':''}`});
   return {ok:true,crew,task,mismatch:task.profileMismatch};
@@ -709,12 +713,12 @@ function assignCrews(state) {
       continue;
     }
     if (!task.committed) {
-      if (state.budget < task.cost) {
+      if (state.budget+1e-6 < task.cost) {
         task.status = 'blocked';
         state.log.push({ type: 'risk', text: `Не хватает бюджета на «${task.title}»` });
         continue;
       }
-      state.budget -= task.cost;
+      state.budget = Math.max(0,state.budget-task.cost);
       recordCash(state,'expense','Работы',task.cost,`Материалы и работы: ${task.title}`);
       task.committed = true;
     }

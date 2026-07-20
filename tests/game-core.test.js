@@ -80,6 +80,12 @@ test('foreman automatically completes survey and unlocks parallel work', () => {
   assert.equal(state.tasks.find((task) => task.id === 'electric').status, 'ready');
 });
 
+test('a budget-blocked task returns to the queue when financing arrives',()=>{
+  const state=createInitialState();const task=state.tasks.find(item=>item.id==='survey');state.tasks=[task];state.started=true;state.paused=false;state.plannedDay=0;state.nextMajorEventAt=999;state.eventSchedule=[];task.status='ready';task.enabledToday=true;state.budget=task.cost-1;
+  tickState(state,.1);assert.equal(task.status,'blocked');assert.equal(task.committed,false);
+  state.budget=task.cost;unlockTasks(state);assert.equal(task.status,'ready');tickState(state,.1);assert.equal(task.status,'active');assert.equal(task.committed,true);assert.equal(state.budget,0);
+});
+
 test('priority cycles without mutating active work', () => {
   const state = createInitialState();
   assert.equal(cyclePriority(state, 'move'), true);
