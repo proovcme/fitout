@@ -8,6 +8,16 @@ export const INITIAL_BUDGET = 1180;
 export const DEADLINE_HOURS = 72;
 export const REAL_SECONDS_PER_WORKDAY = 300;
 export const GAME_HOURS_PER_REAL_SECOND = 9 / REAL_SECONDS_PER_WORKDAY;
+const PROJECT_FINANCE_ACCOUNTING_VERSION = 2;
+const CLIENT_PAYMENT_CATEGORIES = new Set([
+  'Аванс',
+  'Заказчик',
+  'Резерв',
+  'Допфинансирование заказчика',
+  'Этапный платёж',
+  'Финальное закрытие',
+  'Порешали с финансированием',
+]);
 
 const DEFAULT_ORGANIZATION = {
   name:'ООО «Потом согласуем»',
@@ -66,6 +76,28 @@ export function takeOrganizationLoan(state,principal,requestedRecipient='auto') 
   organization.history.unshift({type:'loan',amount:principal,repayment,monthlyPayment,recipient,at:Date.now()});
   organization.history=organization.history.slice(0,30);
   return {ok:true,principal,repayment,rate,termMonths,monthlyPayment,recipient};
+}
+
+export function ensureProjectFinance(state) {
+  state.finance??={ledger:[],contractValue:state.contract?.budget??0,received:0,spent:0};
+  const finance=state.finance;
+  finance.ledger??=[];
+  finance.contractValue??=state.contract?.budget??0;
+  finance.received??=0;
+  finance.spent??=0;
+  if(finance.accountingVersion!==PROJECT_FINANCE_ACCOUNTING_VERSION) {
+    const legacyTotalIncome=Math.max(0,Number(finance.totalIncome??finance.received) || 0);
+    const knownNonClientIncome=finance.ledger.reduce((sum,row)=>sum+(row.type==='income'&&!CLIENT_PAYMENT_CATEGORIES.has(row.category)?Math.max(0,Number(row.amount)||0):0),0);
+    const knownClientIncome=finance.ledger.reduce((sum,row)=>sum+(row.type==='income'&&CLIENT_PAYMENT_CATEGORIES.has(row.category)?Math.max(0,Number(row.amount)||0):0),0);
+    const inferredClientIncome=Math.max(knownClientIncome,legacyTotalIncome-knownNonClientIncome);
+    finance.totalIncome=legacyTotalIncome;
+    finance.received=Math.min(Math.max(0,finance.contractValue),Math.max(0,inferredClientIncome));
+    finance.advanceReceived=finance.advanceReceived??Math.min(finance.received,Math.max(0,Math.round(finance.contractValue*.45)));
+    finance.accountingVersion=PROJECT_FINANCE_ACCOUNTING_VERSION;
+  }
+  finance.totalIncome=Math.max(finance.received,Number(finance.totalIncome)||0);
+  finance.advanceReceived=Math.min(finance.received,Math.max(0,Number(finance.advanceReceived)||0));
+  return finance;
 }
 
 export function advanceOrganizationDays(state,days) {
@@ -355,7 +387,7 @@ export function requestClientFunding(state,rng=Math.random) {
   const chance=Math.max(.18,Math.min(.86,.22+state.trust*.005+progress*.28+(state.budget<0?.1:0)));
   const approved=rng()<chance;
   const result={ok:true,approved,amount:approved?amount:0,requested:amount,chance,day};
-  if(approved){state.budget+=amount;state.contract.budget+=amount;if(state.finance)state.finance.contractValue=(state.finance.contractValue??0)+amount;state.trust=Math.max(0,state.trust-3);recordCash(state,'income','Допфинансирование заказчика',amount,'Согласованный дополнительный резерв');state.log.push({type:'done',text:`Заказчик открыл дополнительный резерв ${amount}К`});}
+  if(approved){state.budget+=amount;state.contract.budget+=amount;ensureProjectFinance(state).contractValue+=amount;state.trust=Math.max(0,state.trust-3);recordCash(state,'income','Допфинансирование заказчика',amount,'Согласованный дополнительный резерв',{clientPayment:true});state.log.push({type:'done',text:`Заказчик открыл дополнительный резерв ${amount}К`});}
   else{state.trust=Math.max(0,state.trust-2);state.log.push({type:'risk',text:'Заказчик ответил, что деньги уже были в исходном бюджете.'});}
   state.clientFundingRequests.unshift(result);state.clientFundingRequests=state.clientFundingRequests.slice(0,20);
   return result;
@@ -378,7 +410,7 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     tasks: TASK_BLUEPRINTS.map((task) => ({ ...task, progress: 0, status: 'locked', crewId: null, committed: false })),
     contractors: createContractorMarket(),
     team: TEAM_BLUEPRINTS.map((member)=>({...member,hired:false})),
-    finance:{ledger:[{hour:0,type:'income',category:'Аванс',amount:INITIAL_BUDGET,text:'Стартовое финансирование'}],contractValue:INITIAL_BUDGET,received:INITIAL_BUDGET,spent:0},
+    finance:{ledger:[{hour:0,type:'income',category:'Аванс',amount:INITIAL_BUDGET,text:'Стартовое финансирование'}],contractValue:INITIAL_BUDGET,received:INITIAL_BUDGET,totalIncome:INITIAL_BUDGET,advanceReceived:INITIAL_BUDGET,spent:0,accountingVersion:PROJECT_FINANCE_ACCOUNTING_VERSION},
     crews: [
       { id: 'foreman', name: 'Вы', role: 'Генеральный директор', skill: 'management', color: '#ddff55', initials: 'ГД', speed: .7, quality: .92, taskId: null, x: 4, y: 6, state: 'idle' },
       { id: 'general-crew', name: 'Хозбригада «Сами справимся»', role: 'Универсальная штатная бригада', skill: 'general', color: '#9aa89d', initials: 'ХБ', speed: .52, quality: .78, manpower:4, taskId: null, x: 7, y: 7, state: 'idle',level:1 },
@@ -444,7 +476,7 @@ export function selectOrder(state, order) {
   };
   const advance=Math.round(order.budget*.45);
   state.budget = advance;
-  state.finance={ledger:[{hour:0,type:'income',category:'Заказчик',amount:advance,text:`Аванс 45% · ${order.clientName}`}],contractValue:order.budget,received:advance,spent:0};
+  state.finance={ledger:[{hour:0,type:'income',category:'Заказчик',amount:advance,text:`Аванс 45% · ${order.clientName}`}],contractValue:order.budget,received:advance,totalIncome:advance,advanceReceived:advance,spent:0,accountingVersion:PROJECT_FINANCE_ACCOUNTING_VERSION};
   state.quality = Math.max(66, order.finishQuality - 5);
   state.trust = order.clientType === 'state' ? 68 : 72;
   state.tasks = Array.isArray(order.tasks)?order.tasks.map(task=>({...task})):buildTasksForOrder(order);
@@ -480,13 +512,16 @@ export function applyContractCard(state,card) {
   if(state.selectedOrder?.fixedContract&&((card.budget??0)!==0||(card.deadline??0)!==0))return false;
   state.contract.cardsPlayed.push(card.id);
   state.contract.budget+=card.budget??0;state.contract.deadlineHours+=card.deadline??0;state.contract.qualityTarget+=card.quality??0;state.trust+=card.trust??0;
-  if(card.budget){state.budget+=card.budget;recordCash(state,'income','Резерв',card.budget,card.title);}return true;
+  if(card.budget){state.budget+=card.budget;ensureProjectFinance(state).contractValue+=card.budget;recordCash(state,'income','Резерв',card.budget,card.title,{clientPayment:true});}return true;
 }
 
-function recordCash(state,type,category,amount,text) {
-  state.finance??={ledger:[],contractValue:state.contract?.budget??0,received:0,spent:0};
-  state.finance.ledger??=[];state.finance.ledger.unshift({hour:state.elapsed??0,type,category,amount:Math.round(amount),text});state.finance.ledger=state.finance.ledger.slice(0,80);
-  if(type==='income')state.finance.received=(state.finance.received??0)+amount;else state.finance.spent=(state.finance.spent??0)+amount;
+function recordCash(state,type,category,amount,text,{clientPayment=false}={}) {
+  const finance=ensureProjectFinance(state);
+  finance.ledger.unshift({hour:state.elapsed??0,type,category,amount:Math.round(amount),text});finance.ledger=finance.ledger.slice(0,80);
+  if(type==='income') {
+    finance.totalIncome=(finance.totalIncome??0)+amount;
+    if(clientPayment)finance.received=(finance.received??0)+amount;
+  } else finance.spent=(finance.spent??0)+amount;
 }
 
 function spendProjectAndCompany(state,amount) {
@@ -786,11 +821,16 @@ export function updateSiteCleanliness(state,deltaHours){
 
 function releaseStagePayment(state,task) {
   if(task.reworkOf||['executive-docs','inspect'].includes(task.id))return 0;
-  const contractValue=state.finance?.contractValue??state.contract?.budget??0;
+  const finance=ensureProjectFinance(state);
+  const contractValue=finance.contractValue??state.contract?.budget??0;
   const retention=Math.round(contractValue*.15);
-  const available=Math.max(0,contractValue-retention-(state.finance?.received??0));
-  const payment=Math.min(available,Math.max(5,Math.round(task.cost*1.15)));
-  if(payment>0){state.budget+=payment;recordCash(state,'income','Этапный платёж',payment,task.title);}
+  const available=Math.max(0,contractValue-retention-(finance.received??0));
+  const payableTasks=state.tasks.filter(item=>!item.reworkOf&&!['executive-docs','inspect'].includes(item.id)&&item.status!=='skipped');
+  const totalWeight=payableTasks.reduce((sum,item)=>sum+Math.max(1,item.cost??1),0);
+  const stagePool=Math.max(0,contractValue-retention-(finance.advanceReceived??0));
+  const taskShare=totalWeight?Math.round(stagePool*Math.max(1,task.cost??1)/totalWeight):0;
+  const payment=Math.min(available,Math.max(1,taskShare));
+  if(payment>0){state.budget+=payment;recordCash(state,'income','Этапный платёж',payment,task.title,{clientPayment:true});}
   return payment;
 }
 
@@ -828,8 +868,8 @@ function completeTask(state, task, crew) {
     }
   }
   if(task.id==='inspect'&&state.tasks.find(item=>item.id==='executive-docs')?.status==='done') {
-    const finalPayment=Math.max(0,Math.round((state.finance?.contractValue??state.contract?.budget??0)-(state.finance?.received??0)));
-    if(finalPayment>0){state.budget+=finalPayment;recordCash(state,'income','Финальное закрытие',finalPayment,'Удержание выплачено после сдачи полного комплекта ИД');state.log.push({type:'done',text:`Документация принята. Разблокировано финальное закрытие ${finalPayment}К`});}
+    const finance=ensureProjectFinance(state);const finalPayment=Math.max(0,Math.round((finance.contractValue??state.contract?.budget??0)-(finance.received??0)));
+    if(finalPayment>0){state.budget+=finalPayment;recordCash(state,'income','Финальное закрытие',finalPayment,'Удержание выплачено после сдачи полного комплекта ИД',{clientPayment:true});state.log.push({type:'done',text:`Документация принята. Разблокировано финальное закрытие ${finalPayment}К`});}
   }
   unlockTasks(state);
 }
@@ -845,7 +885,7 @@ export function submitTaskForAcceptance(state,taskId,rng=Math.random) {
   const retryBonus=(task.acceptanceAttempts??0)*.14;
   const chance=Math.max(.3,Math.min(.97,.52+teamBonus+contractorBonus+retryBonus-noDesignPenalty));
   const accepted=rng()<chance;task.acceptanceAttempts=(task.acceptanceAttempts??0)+1;
-  if(accepted){task.status='done';state.quality=Math.min(100,state.quality+(task.acceptanceQualityGain??task.quality));state.trust=Math.min(100,state.trust+1);const payment=releaseStagePayment(state,task);if(task.lastCrewId?.startsWith('crew-')){const contractorId=task.lastCrewId.slice(5);const organization=ensureOrganization(state);organization.contractorXp[contractorId]=(organization.contractorXp[contractorId]??0)+.5;}state.log.push({type:'done',text:`Принято: ${task.title}${payment?` · закрыто ${payment}К`:''}`});unlockTasks(state);return {ok:true,accepted:true,chance,payment};}
+  if(accepted){task.status='done';state.quality=Math.min(100,state.quality+(task.acceptanceQualityGain??task.quality));state.trust=Math.min(100,state.trust+1);const payment=releaseStagePayment(state,task);const finance=ensureProjectFinance(state);const paymentReason=payment?null:(finance.received??0)>=Math.round((finance.contractValue??0)*.85)-1?'retention':'no-funding';if(task.lastCrewId?.startsWith('crew-')){const contractorId=task.lastCrewId.slice(5);const organization=ensureOrganization(state);organization.contractorXp[contractorId]=(organization.contractorXp[contractorId]??0)+.5;}state.log.push({type:'done',text:`Принято: ${task.title}${payment?` · закрыто ${payment}К`:paymentReason==='retention'?' · остаток удержан до ИД':' · платёж не предусмотрен'}`});unlockTasks(state);return {ok:true,accepted:true,chance,payment,paymentReason};}
   const remedialCost=Math.max(4,Math.round(task.cost*.1));state.budget-=remedialCost;recordCash(state,'expense','Замечания при приёмке',remedialCost,task.title);
   task.status='ready';task.enabledToday=false;task.progress=Math.max(0,1-4.5/Math.max(4.5,task.duration));task.acceptanceRework=true;state.quality=Math.max(0,state.quality-1);state.trust=Math.max(0,state.trust-1);state.log.push({type:'risk',text:`Не принято: ${task.title}. Минимум полсмены на замечания.`});
   return {ok:true,accepted:false,chance,remedialCost,remainingHours:4.5};
@@ -866,7 +906,7 @@ export function tryMagicResolve(state,rng=Math.random){
   }
   if(outcome<.74){
     const amount=Math.max(35,Math.min(160,Math.round((state.contract?.budget??800)*.07/5)*5));
-    state.finance??={ledger:[],contractValue:state.contract?.budget??0,received:0,spent:0};state.budget+=amount;state.contract.budget+=amount;state.finance.contractValue=(state.finance.contractValue??0)+amount;recordCash(state,'income','Порешали с финансированием',amount,'Дополнительный резерв без удобного объяснения');state.trust=Math.max(0,state.trust-2);state.log.push({type:'done',text:`Порешали: на объект пришло ещё ${amount}К. Назначение платежа лучше не перечитывать.`});return {ok:true,success:true,outcome:'money',amount,chance,cooldownHours};
+    const finance=ensureProjectFinance(state);state.budget+=amount;state.contract.budget+=amount;finance.contractValue+=amount;recordCash(state,'income','Порешали с финансированием',amount,'Дополнительный резерв без удобного объяснения',{clientPayment:true});state.trust=Math.max(0,state.trust-2);state.log.push({type:'done',text:`Порешали: на объект пришло ещё ${amount}К. Назначение платежа лучше не перечитывать.`});return {ok:true,success:true,outcome:'money',amount,chance,cooldownHours};
   }
   const hours=12;state.contract.deadlineHours+=hours;state.trust=Math.max(0,state.trust-1);state.log.push({type:'done',text:`Порешали: заказчик дал ещё ${hours} часов и попросил никому не говорить, что он их дал.`});return {ok:true,success:true,outcome:'deadline',hours,chance,cooldownHours};
 }
@@ -993,7 +1033,7 @@ export function applyCatalogEventChoice(state, event, choiceId) {
   const deltas=option.deltas??{};
   state.budget+=deltas.budget??0;
   if(option.financial==='client-extra'&&deltas.budget>0){state.contract.budget+=deltas.budget;if(state.finance)state.finance.contractValue=(state.finance.contractValue??0)+deltas.budget;}
-  if(deltas.budget)recordCash(state,deltas.budget>0?'income':'expense','Событие',Math.abs(deltas.budget),event.title);
+  if(deltas.budget)recordCash(state,deltas.budget>0?'income':'expense',option.financial==='client-extra'?'Допфинансирование заказчика':'Событие',Math.abs(deltas.budget),event.title,{clientPayment:option.financial==='client-extra'&&deltas.budget>0});
   state.quality+=deltas.quality??0;
   state.trust+=deltas.trust??0;
   state.elapsed+=deltas.time??0;
@@ -1133,6 +1173,7 @@ export function restoreState(raw) {
     ensureGameSaveV2(parsed);
     if((!Array.isArray(parsed.tasks)||!Array.isArray(parsed.crews))&&parsed.portfolio?.activeProjectId)activatePortfolioProject(parsed,parsed.portfolio.activeProjectId);
     if (!Array.isArray(parsed.tasks) || !Array.isArray(parsed.crews)) return null;
+    ensureProjectFinance(parsed);
     return parsed;
   } catch {
     return null;

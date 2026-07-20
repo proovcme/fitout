@@ -13,6 +13,7 @@ import {
   cyclePriority,
   developHeadquarters,
   dismissContractor,
+  ensureProjectFinance,
   ensureRuntimeCrews,
   forceAssignCrew,
   hireContractor,
@@ -213,6 +214,19 @@ test('client funds the project by advance and completed schedule stages', () => 
   for(let hour=0;hour<48&&!state.finance.ledger.some(row=>row.category==='Этапный платёж');hour+=1){tickState(state,1);if(state.needsReport){state.reportedDay=Math.floor(state.elapsed/24);state.needsReport=false;}if(state.needsPlanning){state.plannedDay=Math.floor(state.elapsed/24);state.needsPlanning=false;state.tasks.find(task=>task.id==='survey').enabledToday=true;}state.paused=false;}
   assert.ok(state.finance.ledger.some(row=>row.category==='Этапный платёж'));
   assert.ok(state.finance.received>advance);
+});
+
+test('loans and other site income never consume the client stage-payment limit',()=>{
+  const state=createInitialState(makeSeededRng(19),allRandomEvents);const order=generateOrders(makeSeededRng(19),1)[0];selectOrder(state,order);
+  const clientReceived=state.finance.received;const totalIncome=state.finance.totalIncome;assert.equal(takeOrganizationLoan(state,300,'project').ok,true);
+  assert.equal(state.finance.received,clientReceived);assert.equal(state.finance.totalIncome,totalIncome+300);
+  const task=state.tasks.find(item=>item.id==='project')??state.tasks.find(item=>!['executive-docs','inspect'].includes(item.id));Object.assign(task,{status:'awaiting',progress:1,acceptanceQuality:1,acceptanceQualityGain:2,lastCrewLevel:1});
+  const accepted=submitTaskForAcceptance(state,task.id,()=>0);assert.equal(accepted.accepted,true);assert.ok(accepted.payment>0);assert.equal(state.finance.received,clientReceived+accepted.payment);
+});
+
+test('legacy project finance separates client payments from borrowed money',()=>{
+  const state=createInitialState();state.finance={contractValue:1000,received:750,spent:90,ledger:[{type:'income',category:'Заказчик',amount:450},{type:'income',category:'Кредит организации',amount:300}]};
+  const finance=ensureProjectFinance(state);assert.equal(finance.received,450);assert.equal(finance.totalIncome,750);assert.equal(finance.advanceReceived,450);
 });
 
 test('organization carries project profit and interest-bearing debt between projects', () => {

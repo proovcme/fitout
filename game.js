@@ -14,6 +14,7 @@ import {
   cyclePriority,
   dismissContractor,
   ensureOrganization,
+  ensureProjectFinance,
   ensureRuntimeCrews,
   ensureWorkforceMarket,
   forceAssignCrew,
@@ -624,10 +625,10 @@ function renderTeamBook() {
 }
 
 function renderFinanceBook() {
-  const finance=state.finance??{ledger:[],received:0,spent:0};
+  const finance=ensureProjectFinance(state);
   const organization=ensureOrganization(state);const month=Math.floor((organization.calendarDay??0)/30)+1;
   const nextLoan=[...(organization.loans??[])].sort((a,b)=>(a.nextDueMonth??0)-(b.nextDueMonth??0))[0];
-  const retention=Math.max(0,(finance.contractValue??0)-(finance.received??0));const docsDone=state.tasks.find(task=>task.id==='executive-docs')?.status==='done';
+  const retention=Math.min(Math.max(0,(finance.contractValue??0)-(finance.received??0)),Math.round((finance.contractValue??0)*.15));const docsDone=state.tasks.find(task=>task.id==='executive-docs')?.status==='done';
   $('#financeKpis').innerHTML=`<div><small>СЧЁТ ОБЪЕКТА</small><strong>${money(state.budget)}</strong></div><div><small>КАССА ОРГАНИЗАЦИИ</small><strong>${money(organization.cash)}</strong></div><div><small>ДОЛГ БАНКУ</small><strong>${money(organization.debt)}</strong></div><div><small>УДЕРЖАНО ДО СДАЧИ ИД</small><strong>${money(retention)} · ${docsDone?'ИД ГОТОВА':'БЛОК'}</strong></div><div><small>СЛЕДУЮЩИЙ ПЛАТЁЖ</small><strong>${nextLoan?money(Math.min(nextLoan.remaining,nextLoan.monthlyPayment+(nextLoan.arrears??0))):'—'}</strong></div><div><small>КАЛЕНДАРЬ / ПРОСРОЧКА</small><strong>М${month} · ${money(organization.arrears??0)}</strong></div>`;
   const loanRows=(organization.loans??[]).map(loan=>`<article><span><strong>${loan.label}</strong><small>${Math.round(loan.rate*100)}% · ещё ${money(loan.remaining)}</small></span><b>${money(loan.monthlyPayment)}/мес</b></article>`).join('');
   const creditDisabled=organization.debt>=2320;
@@ -746,6 +747,7 @@ function renderSelection() {
 }
 
 function renderHud() {
+  ensureProjectFinance(state);
   const done = state.tasks.filter((task) => ['done','skipped'].includes(task.status)).length;
   const deadline=state.contract?.deadlineHours??DEADLINE_HOURS;
   const initialBudget=state.contract?.budget??INITIAL_BUDGET;
@@ -753,7 +755,7 @@ function renderHud() {
   const clock = formatClock(state.elapsed);
   const risk = getRisk(state);
   refs.budget.textContent = money(state.budget);
-  refs.budgetDelta.textContent = `оплачено ${money(state.finance?.spent??Math.max(0,initialBudget-state.budget))}`;
+  refs.budgetDelta.textContent = `расходы ${money(state.finance?.spent??Math.max(0,initialBudget-state.budget))}`;
   refs.deadline.textContent = remaining >= 0 ? formatRemaining(remaining) : `просрочка ${Math.ceil(-remaining)} ч`;
   refs.deadlineStatus.textContent = remaining > 24 ? 'В графике' : remaining > 0 ? 'На грани' : 'Опоздание';
   refs.deadlineStatus.className = `status-pill ${remaining > 24 ? 'safe' : remaining > 0 ? 'warning' : 'critical'}`;
@@ -2274,7 +2276,7 @@ document.addEventListener('click',(event)=>{
   const priority=event.target.closest('[data-priority]');
   if(priority){event.stopPropagation(); if(cyclePriority(state,priority.dataset.priority)){renderTasks();showToast('Приоритет изменён. Прораб многозначительно переставил стикер.');}}
   const submitTask=event.target.closest('[data-submit-task]');
-  if(submitTask){event.stopPropagation();const result=submitTaskForAcceptance(state,submitTask.dataset.submitTask);if(result.ok){renderAll();persistGame();feedback(result.accepted?'cash':'risk');showToast(result.accepted?`Работа принята${result.payment?` — заказчик закрыл ${money(result.payment)}`:''}.`:`Не приняли. Замечания займут минимум полсмены и ${money(result.remedialCost)}.`,result.accepted?'done':'risk');}}
+  if(submitTask){event.stopPropagation();const result=submitTaskForAcceptance(state,submitTask.dataset.submitTask);if(result.ok){renderAll();persistGame();feedback(result.accepted?(result.payment?'cash':'done'):'risk');const acceptedText=result.payment?`Работа принята — заказчик перечислил ${money(result.payment)}.`:result.paymentReason==='retention'?'Работа принята. Промежуточный лимит выплачен; остаток заказчик удерживает до сдачи ИД.':'Работа принята, но платёж по этому этапу договором не предусмотрен.';showToast(result.accepted?acceptedText:`Не приняли. Замечания займут минимум полсмены и ${money(result.remedialCost)}.`,result.accepted?'done':'risk');}}
   const hire=event.target.closest('[data-hire]');
   if(hire){const result=hireContractor(state,hire.dataset.hire); if(result.ok){renderAll();showToast(`${result.contractor.company}: мобилизация подтверждена`,'done');}else if(result.reason==='budget'){showToast('На счёте недостаточно оптимизма и денег.','risk');}}
   const choice=event.target.closest('[data-event-choice]');
