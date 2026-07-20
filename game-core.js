@@ -2,6 +2,7 @@ import { buildTasksForOrder } from './order-generator.js';
 import { generateAmbientBeat, generateSiteLine } from './procedural-content.js';
 import { SITUATIONS, situationById } from './situations.js';
 import { randomEventById } from './events/index.js';
+import { activatePortfolioProject, ensureGameSaveV2, postLedgerEntry, syncActiveProjectToPortfolio } from './company-core.js';
 
 export const INITIAL_BUDGET = 1180;
 export const DEADLINE_HOURS = 72;
@@ -26,9 +27,10 @@ const DEFAULT_ORGANIZATION = {
 };
 
 export function ensureOrganization(state) {
-  const organization=state.organization??{};
+  ensureGameSaveV2(state);
+  const organization=state.company??state.organization??{};
   for(const [key,value] of Object.entries(DEFAULT_ORGANIZATION))if(organization[key]===undefined)organization[key]=Array.isArray(value)?[...value]:value;
-  state.organization=organization;
+  state.company=organization;state.organization=organization;
   state.organization.history??=[];
   state.organization.loans??=[];
   state.organization.calendarDay??=0;
@@ -58,7 +60,7 @@ export function takeOrganizationLoan(state,principal,requestedRecipient='auto') 
   const activeProject=Boolean(state.selectedOrder)&&!state.completed&&['negotiation','preparation','schedule','planning','execution'].includes(state.phase);
   const recipient=requestedRecipient==='organization'?'organization':requestedRecipient==='project'&&activeProject?'project':activeProject?'project':'organization';
   if(recipient==='project'){state.budget+=principal;recordCash(state,'income','Кредит организации',principal,'Мостовое финансирование текущего объекта');}
-  else organization.cash+=principal;
+  else postLedgerEntry(state,{type:'income',category:'Кредит',amount:principal,text:`Получен ${principal===300?'оборотный':'проектный'} кредит`});
   const loan={id:`loan-${Date.now()}-${organization.loans.length}`,principal,remaining:repayment,monthlyPayment,rate,termMonths,nextDueMonth:Math.floor(organization.calendarDay/30)+1,arrears:0,label:principal===300?'Оборотный 300К':'Проектный 800К'};
   organization.loans.push(loan);organization.debt+=repayment;
   organization.history.unshift({type:'loan',amount:principal,repayment,monthlyPayment,recipient,at:Date.now()});
@@ -80,7 +82,7 @@ export function advanceOrganizationDays(state,days) {
       if((loan.remaining??0)<=0||(loan.nextDueMonth??1)>month)continue;
       const due=Math.min(loan.remaining,loan.monthlyPayment+(loan.arrears??0));
       const paid=Math.min(Math.max(0,organization.cash),due);
-      organization.cash-=paid;loan.remaining-=paid;summary.paid+=paid;organization.paymentsMade+=paid;
+      if(paid)postLedgerEntry(state,{type:'expense',category:'Кредит',amount:paid,counterparty:'Банк',text:`Ежемесячный платёж: ${loan.label}`});loan.remaining-=paid;summary.paid+=paid;organization.paymentsMade+=paid;
       const missed=Math.max(0,due-paid);
       if(missed>0){const penalty=Math.max(1,Math.ceil(missed*.02));loan.arrears=missed;loan.remaining+=penalty;summary.missed+=missed;summary.penalty+=penalty;organization.reputation=Math.max(0,organization.reputation-4);}
       else loan.arrears=0;
@@ -108,7 +110,8 @@ export function settleProjectEconomy(state) {
   if(state.projectSettlement)return state.projectSettlement;
   const loanSummary=syncOrganizationCalendar(state,true);
   const profit=Math.round(state.budget);
-  organization.cash+=profit;
+  if(profit>0)postLedgerEntry(state,{type:'income',category:'Результат объекта',amount:profit,projectId:state.selectedOrder?.id,text:`Перенос прибыли: ${state.selectedOrder?.title??'объект'}`});
+  else if(profit<0)postLedgerEntry(state,{type:'expense',category:'Результат объекта',amount:Math.abs(profit),projectId:state.selectedOrder?.id,text:`Покрытие убытка: ${state.selectedOrder?.title??'объект'}`});
   organization.totalProfit+=profit;
   organization.projectsCompleted+=1;
   organization.reputation=Math.max(0,Math.min(100,organization.reputation+Math.round((state.trust-65)/8)+(state.quality>=(state.contract?.qualityTarget??78)?3:-4)));
@@ -131,7 +134,7 @@ export function developHeadquarters(state, rng = Math.random) {
   const costs=[80,170,320,520];
   const cost=costs[Math.min(state.hq.level,costs.length-1)];
   if(organization.cash<cost)return {ok:false,reason:'cash',cost,...state.hq};
-  organization.cash-=cost;state.hq.attempts+=1;
+  postLedgerEntry(state,{type:'expense',category:'Свой офис',amount:cost,text:'Попытка улучшения штаба'});state.hq.attempts+=1;
   const titles=['Стол у принтера','Кабинет без окна','Комната с фикусом','Почти настоящий офис','Офис, который не стыдно показать'];
   const failures=['Арендодатель передумал после слова «переговорка».','Выбрали помещение. В нём уже живёт бухгалтерия.','Дизайнер потратил бюджет на мудборд из бетона.','Кресло приехало. Офис — нет.','Согласовали планировку, но не нашли вход.'];
   const chance=Math.min(.58,.28+organization.reputation*.003);
@@ -146,7 +149,7 @@ export function developHeadquarters(state, rng = Math.random) {
 export function toggleInHouseDesign(state){
   const organization=ensureOrganization(state);const activeProject=Boolean(state.selectedOrder)&&state.started&&!state.completed;
   if(activeProject)return {ok:false,reason:'active-project'};
-  if(!organization.inHouseDesign){const cost=240;if((state.hq?.level??0)<2)return {ok:false,reason:'hq-level',cost};if(organization.cash<cost)return {ok:false,reason:'cash',cost};organization.cash-=cost;organization.inHouseDesign=true;organization.history.unshift({type:'staff',role:'design',amount:cost,active:true,at:Date.now()});ensureRuntimeCrews(state);return {ok:true,active:true,cost,dailyCost:12};}
+  if(!organization.inHouseDesign){const cost=240;if((state.hq?.level??0)<2)return {ok:false,reason:'hq-level',cost};if(organization.cash<cost)return {ok:false,reason:'cash',cost};postLedgerEntry(state,{type:'expense',category:'Проектный отдел',amount:cost,text:'Запуск собственного проектного отдела'});organization.inHouseDesign=true;organization.history.unshift({type:'staff',role:'design',amount:cost,active:true,at:Date.now()});ensureRuntimeCrews(state);return {ok:true,active:true,cost,dailyCost:12};}
   organization.inHouseDesign=false;state.crews=state.crews.filter(crew=>crew.id!=='inhouse-design');organization.history.unshift({type:'staff',role:'design',amount:0,active:false,at:Date.now()});return {ok:true,active:false,cost:0,dailyCost:0};
 }
 
@@ -210,8 +213,8 @@ export function ensureWorkforceMarket(state) {
 
 export function ensureRuntimeCrews(state){
   state.crews??=[];
-  if(!state.crews.some(crew=>crew.id==='foreman'))state.crews.unshift({id:'foreman',name:'Вы',role:'Технический заказчик',skill:'management',color:'#ddff55',initials:'ТЗ',speed:.7,quality:.92,taskId:null,x:4,y:6,state:'idle'});
-  const player=state.crews.find(crew=>crew.id==='foreman');Object.assign(player,{name:'Вы',role:'Технический заказчик',skill:'management',initials:'ТЗ',speed:.7,quality:.92});
+  if(!state.crews.some(crew=>crew.id==='foreman'))state.crews.unshift({id:'foreman',name:'Вы',role:'Генеральный директор',skill:'management',color:'#ddff55',initials:'ГД',speed:.7,quality:.92,taskId:null,x:4,y:6,state:'idle'});
+  const player=state.crews.find(crew=>crew.id==='foreman');Object.assign(player,{name:'Вы',role:'Генеральный директор',skill:'management',initials:'ГД',speed:.7,quality:.92});
   if(!state.crews.some(crew=>crew.id==='general-crew'))state.crews.push({id:'general-crew',name:'Хозбригада «Сами справимся»',role:'Универсальная штатная бригада',skill:'general',color:'#9aa89d',initials:'ХБ',speed:.52,quality:.78,manpower:4,taskId:null,x:7,y:7,state:'idle',level:1});
   else state.crews.find(crew=>crew.id==='general-crew').manpower??=4;
   for(const member of state.team??[])if(member.hired&&!state.crews.some(crew=>crew.id===`team-${member.id}`))state.crews.push(makeTeamRuntimeCrew(member));
@@ -377,7 +380,7 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     team: TEAM_BLUEPRINTS.map((member)=>({...member,hired:false})),
     finance:{ledger:[{hour:0,type:'income',category:'Аванс',amount:INITIAL_BUDGET,text:'Стартовое финансирование'}],contractValue:INITIAL_BUDGET,received:INITIAL_BUDGET,spent:0},
     crews: [
-      { id: 'foreman', name: 'Вы', role: 'Технический заказчик', skill: 'management', color: '#ddff55', initials: 'ТЗ', speed: .7, quality: .92, taskId: null, x: 4, y: 6, state: 'idle' },
+      { id: 'foreman', name: 'Вы', role: 'Генеральный директор', skill: 'management', color: '#ddff55', initials: 'ГД', speed: .7, quality: .92, taskId: null, x: 4, y: 6, state: 'idle' },
       { id: 'general-crew', name: 'Хозбригада «Сами справимся»', role: 'Универсальная штатная бригада', skill: 'general', color: '#9aa89d', initials: 'ХБ', speed: .52, quality: .78, manpower:4, taskId: null, x: 7, y: 7, state: 'idle',level:1 },
     ],
     plannedDay: 0,
@@ -416,6 +419,7 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     log: [],
   };
   ensureMasterSchedule(initialState);
+  ensureGameSaveV2(initialState);
   return initialState;
 }
 
@@ -427,7 +431,7 @@ export function selectOrder(state, order) {
   if((order.requiredLevel??1)>organization.playerLevel)return false;
   const mobilizationCost=Math.max(12,Math.min(140,Math.round(order.area/28+order.complexity*8)));
   if(organization.cash<mobilizationCost)return false;
-  organization.cash-=mobilizationCost;
+  postLedgerEntry(state,{type:'expense',category:'Тендер и мобилизация',amount:mobilizationCost,projectId:order.id,text:`Выход на переговоры: ${order.title}`});
   organization.history.unshift({type:'bid',title:order.title,amount:mobilizationCost,at:Date.now()});organization.history=organization.history.slice(0,30);
   state.selectedOrder = { ...order, tasks: undefined };
   state.organizationCalendarStartDay=organization.calendarDay;
@@ -484,7 +488,7 @@ function recordCash(state,type,category,amount,text) {
 function spendProjectAndCompany(state,amount) {
   const organization=ensureOrganization(state);const projectPaid=Math.min(Math.max(0,state.budget),amount);const companyPaid=amount-projectPaid;
   if(companyPaid>organization.cash)return {ok:false,reason:'budget'};
-  state.budget-=projectPaid;organization.cash-=companyPaid;return {ok:true,projectPaid,companyPaid,amount};
+  state.budget-=projectPaid;if(companyPaid)postLedgerEntry(state,{type:'expense',category:'Финансирование объекта',amount:companyPaid,projectId:state.selectedOrder?.id,text:'Недостающая часть оплаты объекта'});return {ok:true,projectPaid,companyPaid,amount};
 }
 
 function refundProjectAndCompany(state,payment) {
@@ -1114,13 +1118,17 @@ export function getResult(state) {
 }
 
 export function serializeState(state) {
+  syncActiveProjectToPortfolio(state);
   return JSON.stringify(state);
 }
 
 export function restoreState(raw) {
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.tasks) || !Array.isArray(parsed.crews)) return null;
+    if (!parsed) return null;
+    ensureGameSaveV2(parsed);
+    if((!Array.isArray(parsed.tasks)||!Array.isArray(parsed.crews))&&parsed.portfolio?.activeProjectId)activatePortfolioProject(parsed,parsed.portfolio.activeProjectId);
+    if (!Array.isArray(parsed.tasks) || !Array.isArray(parsed.crews)) return null;
     return parsed;
   } catch {
     return null;

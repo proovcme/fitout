@@ -1,10 +1,14 @@
 {
   "name": "fitout-game",
-  "version": "0.0.10",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:release": "bash scripts/test-release.sh",
+    "smoke:migration": "node scripts/migration-smoke.mjs",
+    "smoke:public": "bash scripts/public-smoke.sh",
+    "deploy": "bash scripts/deploy-vps.sh",
     "dev": "vite --host 127.0.0.1 --port 4173",
     "server": "node server/server.mjs",
     "build": "vite build",

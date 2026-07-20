@@ -7,7 +7,7 @@ const port=Number(process.env.FITOUT_PORT??4188);
 const dataDir=process.env.FITOUT_DATA_DIR??path.resolve('data');
 const dbPath=path.join(dataDir,'players.json');
 const secretPath=path.join(dataDir,'session-secret');
-const maxBody=1_500_000;
+const maxBody=5_000_000;
 const attempts=new Map();
 await mkdir(dataDir,{recursive:true});
 
@@ -45,7 +45,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(req.method==='POST'&&url.pathname==='/save'){
       const name=sessionName(req);if(!name)return json(res,401,{error:'Нужно войти заново.'});
-      const {state}=await bodyOf(req);if(!state||!Array.isArray(state.tasks))return json(res,400,{error:'Сохранение повреждено.'});
+      const {state}=await bodyOf(req);const legacyValid=state&&Array.isArray(state.tasks);const v2Valid=state?.schemaVersion===2&&state.company&&Array.isArray(state.portfolio?.projects)&&state.portfolio.projects.length<=3&&Array.isArray(state.staff?.employees);if(!legacyValid&&!v2Valid)return json(res,400,{error:'Сохранение повреждено.'});
       const db=await readDb();const user=db.users[keyFor(name)];if(!user)return json(res,401,{error:'Игрок не найден.'});
       const wasCompleted=Boolean(user.save?.completed);user.save=state;user.updatedAt=new Date().toISOString();
       if(state.completed&&!wasCompleted){user.history??=[];user.history.unshift({at:user.updatedAt,order:state.selectedOrder?.title??'Безымянный объект',quality:Math.round(state.quality??0),budget:Math.round(state.budget??0)});user.history=user.history.slice(0,40);}

@@ -7,13 +7,11 @@ import {
   applyCatalogEventChoice,
   applyContractCard,
   adjustContractorManpower,
-  attemptHqUpgrade,
   captureMasterSchedule,
   closeDayFinances,
   crewHeadcount,
   createInitialState,
   cyclePriority,
-  developHeadquarters,
   dismissContractor,
   ensureOrganization,
   ensureRuntimeCrews,
@@ -46,6 +44,27 @@ import {
   unlockTasks,
 } from './game-core.js';
 import { allRandomEvents, randomEventById } from './events/index.js';
+import {
+  activatePortfolioProject,
+  addPortfolioProject,
+  advanceCompanyDay,
+  assignEmployee,
+  companyCashForecast,
+  createChangeOrder,
+  createMaterialOrder,
+  dismissEmployee,
+  emergencyTransferEmployee,
+  ensureGameSaveV2,
+  hireEmployee,
+  postLedgerEntry,
+  resolveChangeOrder,
+  setProjectDelegation,
+  settleObligation,
+  startHeadquartersProject,
+  syncActiveProjectToPortfolio,
+  toggleOutsourcedRole,
+} from './company-core.js';
+import { COMPANY_ROLES, staffTrait } from './company-content.js';
 import { createCampaignOrders, generateOrders } from './order-generator.js';
 import { bubbleFor, createPersonProfile, createVisualProfile } from './procedural-content.js';
 import { situationById } from './situations.js';
@@ -192,6 +211,24 @@ let sceneAnimationTime=0;
 let audioEnabled=true;
 let audioContext=null;
 let cameraKick=0;
+let companyTab='portfolio';
+
+const COMPANY_ROLE_SKILLS={
+  'project-manager':'management',foreman:'management',designer:'design',pto:'documentation',
+  procurement:'support',accountant:'support',estimator:'support',safety:'support',lawyer:'support',
+};
+
+function syncAssignedStaffToActiveProject(){
+  ensureGameSaveV2(state);if(!state.selectedOrder)return;
+  const active=state.portfolio.projects.find(project=>project.id===state.portfolio.activeProjectId);if(!active)return;
+  const assigned=new Map(state.staff.employees.filter(employee=>employee.status==='employed'&&(active.staffIds??[]).includes(employee.id)&&(employee.unavailableUntilDay??0)<=state.companyCalendar.day).map(employee=>[employee.id,employee]));
+  state.crews=state.crews.filter(crew=>!crew.id.startsWith('company-')||assigned.has(crew.id.slice(8)));
+  for(const employee of assigned.values()){
+    const crewId=`company-${employee.id}`;const existing=state.crews.find(crew=>crew.id===crewId);const roleSkill=COMPANY_ROLE_SKILLS[employee.roleId]??'support';
+    const data={name:employee.name,role:employee.role,skill:roleSkill,color:employee.color,initials:employee.initials,speed:.72+employee.discipline/250,quality:.76+employee.competence/250,manpower:1,level:employee.level,employeeId:employee.id,supportRole:roleSkill==='support'?employee.roleId:undefined};
+    if(existing)Object.assign(existing,data);else state.crews.push({id:crewId,...data,taskId:null,x:6+(state.crews.length%3),y:5+(state.crews.length%4),state:'idle'});
+  }
+}
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value='') => String(value).replace(/[&<>'"]/g,(character)=>({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[character]));
@@ -213,6 +250,7 @@ const profileStorageKey=(name)=>`${STORAGE_KEY}:${encodeURIComponent((name??'gue
 
 function persistGame() {
   if(!sessionUser)return;
+  syncActiveProjectToPortfolio(state);
   const raw=serializeState(state);
   localStorage.setItem(profileStorageKey(sessionUser),raw);
   fetch('/fg-api/save',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({state})}).catch(()=>{});
@@ -236,9 +274,11 @@ async function localAuth(mode,name,password) {
 
 function installPlayerState(rawState) {
   const loaded=rawState?(typeof rawState==='string'?restoreState(rawState):restoreState(JSON.stringify(rawState))):null;
-  saved=loaded&&!loaded.completed?loaded:null;
+  const hasLivePortfolio=loaded?.portfolio?.projects?.some(project=>!project.summary?.completed);
+  saved=loaded&&(!loaded.completed||hasLivePortfolio)?loaded:null;
   state=saved??createInitialState(Math.random,allRandomEvents);
   if(!saved&&loaded?.organization){state.organization=loaded.organization;state.hq=loaded.hq??state.hq;state.playerAvatar=loaded.playerAvatar??state.playerAvatar;}
+  ensureGameSaveV2(state);
   ensureOrganization(state);
   ensureRuntimeCrews(state);
   ensureWorkforceMarket(state);
@@ -254,14 +294,48 @@ function installPlayerState(rawState) {
   renderedLogLength=state.log.length;resultShown=false;selectedPerson=null;playerMoveTarget=null;playerMoveZoneTaskId=null;if(playerMoveMarker)playerMoveMarker.visible=false;
 }
 
+function renderCompanyConsole(){
+  ensureGameSaveV2(state);syncActiveProjectToPortfolio(state);
+  const content=$('#companyConsoleContent');if(!content)return;
+  const company=state.company;const activeProjects=state.portfolio.projects.filter(project=>!project.summary?.completed);
+  $('#companyDayLabel').textContent=`День ${state.companyCalendar.day+1} · ${activeProjects.length}/${state.portfolio.maxActive} объектов`;
+  const urgent=state.companyInbox.filter(item=>item.urgent).length;$('#companyAlertCount').textContent=`${urgent} ${urgent===1?'срочный вопрос':'срочных вопросов'}`;
+  document.querySelectorAll('[data-company-tab]').forEach(button=>button.classList.toggle('active',button.dataset.companyTab===companyTab));
+  const projectOptions=(selected='')=>`<option value="">Свободен / штаб</option>${activeProjects.map(project=>`<option value="${project.id}" ${project.id===selected?'selected':''}>${escapeHtml(project.summary.title)}</option>`).join('')}`;
+  if(companyTab==='portfolio'){
+    const cards=activeProjects.map(project=>{const summary=project.summary;const manager=state.staff.employees.find(item=>item.id===project.managerEmployeeId);const pending=project.changeOrders?.find(item=>item.status==='requested');return `<article class="portfolio-card ${project.id===state.portfolio.activeProjectId?'active':''}">
+      <div><strong>${escapeHtml(summary.title)}</strong><small>${escapeHtml(summary.location)} · ${summary.area} м² · ${manager?`РП ${escapeHtml(manager.name)}`:'без руководителя'}</small>${pending?`<small class="bad">⚠ ${escapeHtml(pending.title)}</small>`:''}</div>
+      <span class="portfolio-metric"><small>ГОТОВО</small><b>${summary.progress}%</b></span><span class="portfolio-metric"><small>ПРОГНОЗ</small><b class="${summary.forecastProfit>=0?'good':'bad'}">${summary.forecastProfit>=0?'+':''}${money(summary.forecastProfit)}</b></span><span class="portfolio-metric"><small>РАЗРЫВ</small><b class="${summary.cashGap?'bad':'good'}">${money(summary.cashGap)}</b></span>
+      <div class="portfolio-actions"><select data-delegation-project="${project.id}" aria-label="Режим управления"><option value="manual" ${project.delegation.mode==='manual'?'selected':''}>Вручную</option><option value="supervised" ${project.delegation.mode==='supervised'?'selected':''}>Под контролем</option><option value="autonomous" ${project.delegation.mode==='autonomous'?'selected':''}>Автономно</option></select><button type="button" data-open-project="${project.id}">${project.id===state.portfolio.activeProjectId?'На площадке':'Открыть 3D'}</button><button type="button" data-order-materials="${project.id}">Материалы</button><button type="button" data-create-change="${project.id}">Тест допа</button></div>
+      ${pending?`<div class="portfolio-actions" style="grid-column:1/-1"><button data-resolve-change="${project.id}:${pending.uid}:formal">Допсоглашение</button><button data-resolve-change="${project.id}:${pending.uid}:risk">Начать на риск</button><button data-resolve-change="${project.id}:${pending.uid}:refuse">Отказать</button><button data-resolve-change="${project.id}:${pending.uid}:magic">Я в пути!</button></div>`:''}
+    </article>`;}).join('');
+    const inbox=state.companyInbox.slice(0,5).map(item=>`<article class="company-inbox-row"><i></i><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.text)}</small></span><time>день ${item.createdDay+1}</time></article>`).join('');
+    content.innerHTML=`<div class="company-panel">${cards||'<div class="company-empty">Портфель пуст. Ни одного кассового разрыва — подозрительно.</div>'}${inbox?`<div class="company-panel">${inbox}</div>`:''}</div>`;
+  } else if(companyTab==='staff'){
+    const employees=state.staff.employees.filter(employee=>employee.status==='employed').map(employee=>{const strengths=employee.strengths.map(id=>staffTrait(id)?.title).filter(Boolean).join(' · ');const weakness=staffTrait(employee.weakness)?.title;return `<article class="staff-card"><i class="staff-avatar" style="--staff-color:${employee.color}">${employee.initials}</i><div><strong>${escapeHtml(employee.name)} · ${escapeHtml(employee.role)} · ур. ${employee.level}</strong><small>${escapeHtml(employee.biography)}</small><small>${escapeHtml(strengths)} · слабость: ${escapeHtml(weakness)}</small><small>${escapeHtml(employee.currentThought)}</small></div><div class="staff-bars"><span>ЭНЕРГИЯ<i><em style="--value:${employee.energy}%"></em></i></span><span>СТРЕСС<i><em style="--value:${employee.stress}%;--bar:var(--orange)"></em></i></span><span>ВЫГОРАНИЕ<i><em style="--value:${employee.burnout}%;--bar:var(--red)"></em></i></span></div><div class="staff-assign"><select data-staff-project="${employee.id}">${projectOptions(employee.assignedProjectId)}</select><button data-assign-employee="${employee.id}">Назначить</button><button data-transfer-employee="${employee.id}">Срочно</button><button data-dismiss-employee="${employee.id}">${money(employee.salary)}/мес · уволить</button></div></article>`;}).join('');
+    content.innerHTML=`<div class="company-panel">${employees||'<div class="company-empty">Штат отсутствует. Директор уже открыл восемь вкладок с аутсорсом.</div>'}</div>`;
+  } else if(companyTab==='contractors'){
+    content.innerHTML=`<div class="company-panel">${state.contractorNetwork.map(item=>`<article class="contractor-network-card"><i style="--contractor:${item.color}">${escapeHtml(item.company.slice(0,2).toUpperCase())}</i><div><strong>${escapeHtml(item.company)}</strong><small>${escapeHtml(item.name)} · ${escapeHtml(item.quirk??'Характер уточняется после аванса')}</small></div><span>ЛЮДИ<b>${item.manpower}</b></span><span>НАДЁЖНОСТЬ<b>${item.reliability}%</b></span><span>ОТНОШЕНИЯ<b>${item.relationship}/100</b></span></article>`).join('')}</div>`;
+  } else if(companyTab==='finance'){
+    const forecast=companyCashForecast(state,30);const min=Math.min(...forecast.map(item=>item.balance));const maxAbs=Math.max(1,...forecast.map(item=>Math.abs(item.balance)));const obligations=company.obligations.filter(item=>item.status!=='paid').sort((a,b)=>a.dueDay-b.dueDay).slice(0,8);
+    content.innerHTML=`<div class="company-panel"><div class="company-finance-kpis"><div><small>КАССА</small><strong>${money(company.cash)}</strong></div><div><small>РЕЗЕРВ</small><strong>${money(company.reserve)}</strong></div><div><small>ДЕБИТОРКА</small><strong>${money(company.receivables)}</strong></div><div><small>КРЕДИТОРКА</small><strong>${money(company.payables)}</strong></div><div><small>МИНИМУМ 30 ДНЕЙ</small><strong style="color:${min<0?'var(--red)':'var(--green)'}">${money(min)}</strong></div></div><div class="forecast-strip" title="Прогноз остатка на 30 дней">${forecast.map(item=>`<i style="--height:${Math.max(6,Math.round(Math.abs(item.balance)/maxAbs*100))}%;--forecast-color:${item.balance<0?'var(--red)':'var(--green)'}"></i>`).join('')}</div><div><button class="company-action" data-reserve="50">Отложить 50К</button> <button class="company-action" data-reserve="-50">Вернуть 50К</button></div>${obligations.map(item=>`<article class="finance-row"><span>день ${item.dueDay+1}</span><strong>${escapeHtml(item.text||item.counterparty)}</strong><b>${item.direction==='receivable'?'+':'−'}${money(item.remaining)}</b>${item.direction==='payable'?`<button class="company-action" data-pay-obligation="${item.id}">Оплатить</button>`:'<span>ожидаем</span>'}</article>`).join('')}</div>`;
+  } else if(companyTab==='market'){
+    const projectIds=new Set(state.portfolio.projects.map(project=>project.id));const marketOrders=orders.filter(order=>!projectIds.has(order.id)).slice(0,5);const candidates=state.staff.candidates.slice(0,5);
+    content.innerHTML=`<div class="company-panel">${marketOrders.map(order=>`<article class="market-project-card"><div><strong>${escapeHtml(order.title)}</strong><small>${escapeHtml(order.location)} · ${order.area} м² · ${escapeHtml(order.client)}</small></div><span class="portfolio-metric"><small>ДОГОВОР</small><b>${money(order.budget)}</b></span><span class="portfolio-metric"><small>СЛОЖНОСТЬ</small><b>${order.complexity}/5</b></span><button class="company-action" data-add-portfolio-order="${order.id}">Взять в портфель</button></article>`).join('')}${candidates.map(employee=>`<article class="staff-card"><i class="staff-avatar" style="--staff-color:${employee.color}">${employee.initials}</i><div><strong>${escapeHtml(employee.name)} · ${escapeHtml(employee.role)}</strong><small>${escapeHtml(employee.biography)}</small></div><div class="staff-bars"><span>КОМПЕТЕНТНОСТЬ<i><em style="--value:${employee.competence}%"></em></i></span><span>ДИСЦИПЛИНА<i><em style="--value:${employee.discipline}%"></em></i></span><span>ЛОЯЛЬНОСТЬ<i><em style="--value:${employee.loyalty}%"></em></i></span></div><button class="company-action" data-hire-employee="${employee.id}">Нанять · ${money(employee.salary)}/мес</button></article>`).join('')}<div>${COMPANY_ROLES.map(role=>`<button class="company-action" data-outsource-role="${role.id}">${state.staff.outsourcedRoles.includes(role.id)?'✓ ':''}Аутсорс: ${role.title}</button>`).join(' ')}</div></div>`;
+  } else if(companyTab==='office'){
+    const project=state.hq?.project;const active=project?.status==='active';content.innerHTML=`<div class="company-panel"><article class="office-project-card"><div><strong>${escapeHtml(state.hq?.title??'Стол у принтера')} · уровень ${state.hq?.level??0}</strong><small>${active?`Ремонт идёт ${Math.round(project.progress*100)}%. Бюджет ${money(project.budget)}, перерасход ${money(project.overrun)}.`:'Улучшение штаба теперь строится как настоящий внутренний проект: с авансом, сроком и неизбежным «не учли».'}</small><div class="office-project-progress"><i style="--progress:${active?Math.round(project.progress*100):0}%"></i></div></div><button class="company-action" data-start-hq-project ${active?'disabled':''}>${active?'Проект идёт':'Начать улучшение'}</button></article><div class="company-empty">В свободное время здесь находятся сотрудники без назначения. Назначенные на объекты не телепортируются обратно ради красивой картинки.</div></div>`;
+  }
+}
+
 function renderMainMenu() {
   const organization=ensureOrganization(state);
   $('#menuProfileName').textContent=sessionUser??'ИГРОК';
   const continueButton=$('#continueGameButton');
-  continueButton.disabled=!saved;
-  if(saved?.selectedOrder) {
-    const completed=saved.tasks?.filter(task=>['done','skipped'].includes(task.status)).length??0;
-    $('#continueSummary').textContent=`${saved.selectedOrder.title} · ${saved.selectedOrder.location}. Закрыто ${completed} из ${saved.tasks.length} работ, на счёте ${money(saved.budget)}.`;
+  const liveProjects=state.portfolio?.projects?.filter(project=>!project.summary?.completed)??[];
+  continueButton.disabled=!saved&&!liveProjects.length;
+  if(liveProjects.length) {
+    const active=liveProjects.find(project=>project.id===state.portfolio.activeProjectId)??liveProjects[0];
+    $('#continueSummary').textContent=`В портфеле ${liveProjects.length} ${liveProjects.length===1?'объект':'объекта'}. Активный: ${active.summary.title}, готовность ${active.summary.progress}%, прогноз ${active.summary.forecastProfit>=0?'+':''}${money(active.summary.forecastProfit)}.`;
   } else $('#continueSummary').textContent='Сохранённого объекта пока нет. Это самый спокойный момент вашей карьеры.';
   $('#organizationName').textContent=organization.name;
   $('#organizationCash').textContent=money(organization.cash);
@@ -281,9 +355,11 @@ function renderMainMenu() {
   document.querySelectorAll('[data-avatar-outfit]').forEach(button=>button.classList.toggle('active',button.dataset.avatarOutfit===avatar.outfit));
   document.querySelectorAll('[data-avatar-helmet]').forEach(button=>button.classList.toggle('active',button.dataset.avatarHelmet===avatar.helmet));
   document.querySelectorAll('[data-loan]').forEach(button=>{button.disabled=organization.debt>=2320;button.title=button.disabled?'Лимит долговой нагрузки исчерпан':'Деньги попадут в текущий проект или в кассу организации';});
+  renderCompanyConsole();
 }
 
 function resumePlayerGame() {
+  if(state.completed){const next=state.portfolio?.projects?.find(project=>!project.summary?.completed&&project.id!==state.portfolio.activeProjectId);if(next)activatePortfolioProject(state,next.id);}
   refs.menu.classList.remove('visible');
   if(state.started){state.paused=true;if(state.needsPlanning){renderDayPlan();refs.planning.classList.add('visible');}}
   else if(state.phase==='preparation'){renderPreparation();refs.market.classList.add('visible');}
@@ -304,11 +380,12 @@ async function authenticate(mode) {
     if(error instanceof TypeError){payload=await localAuth(mode,name,password);payload.warning='VPS недоступен — работает локальное сохранение.';}
     else{$('#authMessage').textContent=error.message;return;}
   }
+  const migrationNeeded=Boolean(payload.state&&payload.state.schemaVersion!==2);
   sessionUser=payload.user;installPlayerState(payload.state??localStorage.getItem(profileStorageKey(sessionUser)));
   $('#profileName').textContent=sessionUser;$('#profileChip').hidden=false;refs.auth.classList.remove('visible');
   for(const modal of document.querySelectorAll('.modal-backdrop'))if(modal!==refs.auth)modal.classList.remove('visible');
-  renderMainMenu();refs.menu.classList.add('visible');renderAll();
-  showToast(payload.warning??(saved?'Сохранение найдено. Оно ждёт в главном меню.':'Профиль открыт. Можно начинать новую проблему.'),'done');
+  renderMainMenu();refs.menu.classList.add('visible');renderAll();if(migrationNeeded)persistGame();
+  showToast(payload.warning??(migrationNeeded?'Старое сохранение перенесено в компанию v0.1.0. Объект и деньги на месте.':saved?'Сохранение найдено. Оно ждёт в главном меню.':'Профиль открыт. Можно начинать новую проблему.'),'done');
 }
 
 function money(value) {
@@ -316,12 +393,12 @@ function money(value) {
 }
 
 function formatClock(elapsed) {
-  const totalHours = 9 + elapsed;
-  const day = Math.floor(totalHours / 24) + 1;
+  const totalHours = 9 + (elapsed%24);
+  const day = (state.companyCalendar?.day??Math.floor(elapsed/24)) + 1;
   const hour = Math.floor(totalHours) % 24;
   const minute = Math.floor((elapsed % 1) * 60);
-  const names = ['ПТ', 'СБ', 'ВС', 'ПН', 'ВТ'];
-  return { day: `${names[Math.min(day - 1, names.length - 1)]} · ДЕНЬ ${day}`, time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}` };
+  const names = ['ПТ', 'СБ', 'ВС', 'ПН', 'ВТ','СР','ЧТ'];
+  return { day: `${names[(day-1)%names.length]} · ДЕНЬ ${day}`, time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}` };
 }
 
 function formatRemaining(hours) {
@@ -763,6 +840,7 @@ function renderTutorial() {
 }
 
 function renderAll() {
+  syncAssignedStaffToActiveProject();
   renderOrders();
   if(state.selectedOrder)renderNegotiation();
   renderHud();
@@ -933,7 +1011,7 @@ function hqPerson(x,z,color,index){
   return group;
 }
 function hqPlant(x,z){const group=new THREE.Group();group.position.set(x,0,z);hqRoot.add(group);const pot=new THREE.Mesh(new THREE.CylinderGeometry(.2,.16,.34,12),hqMat('#c87552'));pot.position.y=.17;group.add(pot);for(let i=0;i<6;i++){const leaf=new THREE.Mesh(new THREE.SphereGeometry(.17,8,6),hqMat(i%2?'#69a977':'#82bd82'));leaf.scale.set(.5,1.55,.4);leaf.rotation.z=(i-2.5)*.3;leaf.position.set(Math.sin(i)*.12,.58+(i%2)*.1,Math.cos(i)*.12);group.add(leaf);}}
-function rebuildHqPreview(){const hq=state.hq??{level:0,attempts:0};const avatar=state.playerAvatar??{};const key=`${hq.level}:${hq.attempts}:${avatar.color}:${avatar.outfit}:${avatar.helmet}`;if(key===hqPreviewKey)return;hqPreviewKey=key;hqRoot.traverse(node=>{if(node.isMesh){if(!node.userData.riggedAsset)node.geometry?.dispose();if(Array.isArray(node.material))node.material.forEach(item=>item.dispose());else node.material?.dispose();}});hqRoot.clear();hqPreviewPeople=[];hqPreviewScreens=[];const level=hq.level??0;
+function rebuildHqPreview(){const hq=state.hq??{level:0,attempts:0};const avatar=state.playerAvatar??{};const freeStaff=(state.staff?.employees??[]).filter(employee=>employee.status==='employed'&&!employee.assignedProjectId&&(employee.unavailableUntilDay??0)<=(state.companyCalendar?.day??0));const key=`${hq.level}:${hq.attempts}:${avatar.color}:${avatar.outfit}:${avatar.helmet}:${freeStaff.map(employee=>employee.id).join(',')}`;if(key===hqPreviewKey)return;hqPreviewKey=key;hqRoot.traverse(node=>{if(node.isMesh){if(!node.userData.riggedAsset)node.geometry?.dispose();if(Array.isArray(node.material))node.material.forEach(item=>item.dispose());else node.material?.dispose();}});hqRoot.clear();hqPreviewPeople=[];hqPreviewScreens=[];const level=hq.level??0;
   hqBox('hq-slab',[6.4,.22,4.7],[0,-.13,0],hqMat(level>=3?'#c9c3b4':'#8d8b7d'),hqRoot,false);hqBox('hq-back-wall',[6.4,2.1,.12],[0,1.02,-2.3],hqMat(level>=3?'#e5e0d3':'#c8c4b6'));hqBox('hq-left-wall',[.12,2.1,4.7],[-3.15,1.02,0],hqMat(level>=2?'#ded9cc':'#bdbbad'));
   hqDesk(-.75,.35);hqBox('hq-printer',[.58,.48,.52],[-2.35,.28,-1.35],hqMat('#d9ded9',.35,.16));hqBox('hq-paper',[.34,.03,.42],[-2.35,.55,-1.34],hqMat('#f3f0e7'),hqRoot,false);
   if(level===0){hqBox('hq-folding-chair',[.48,.08,.46],[-.7,.39,1.12],hqMat('#65716a'));for(let i=0;i<4;i++)hqBox('hq-failure-box',[.55,.35,.48],[1.45+(i%2)*.62,.18,-.9+Math.floor(i/2)*.55],hqMat(i%2?'#b57b45':'#c98c50'));}
@@ -941,7 +1019,7 @@ function rebuildHqPreview(){const hq=state.hq??{level:0,attempts:0};const avatar
   if(level>=2){hqPlant(2.45,1.45);hqBox('hq-meeting-table',[1.8,.12,.9],[1.35,.65,.9],hqMat('#9a704d'));for(const x of [.7,1.35,2])hqBox('hq-chair',[.38,.55,.38],[x,.3,1.55],hqMat('#496d61'));}
   if(level>=3){hqDesk(-2.05,.55,Math.PI);hqDesk(-.65,-1.25,Math.PI);hqBox('hq-sofa',[1.65,.48,.72],[1.65,.34,-1.2],hqMat('#d87561'));hqBox('hq-rug',[2.0,.025,1.35],[1.5,.02,.1],hqMat('#527369'),hqRoot,false);}
   if(level>=4){const glass=new THREE.MeshPhysicalMaterial({color:'#91cfd0',transparent:true,opacity:.32,roughness:.1,transmission:.2});hqBox('hq-glass',[2.6,1.8,.04],[1.45,.9,-.35],glass);hqBox('hq-sign',[1.35,.45,.06],[-1.65,1.45,-2.21],new THREE.MeshStandardMaterial({color:'#ddff55',emissive:'#8fa82e',emissiveIntensity:.45}));}
-  const colors=['#ddff55','#69bfe8','#a58ae1','#d87561','#69daa9'];for(let i=0;i<Math.min(5,1+level);i++)hqPerson(-1.6+i*.72,1.25-(i%2)*.6,colors[i],i);
+  const visibleStaff=freeStaff.slice(0,4);hqPerson(-1.6,1.25,avatar.color??'#ddff55',0);visibleStaff.forEach((employee,index)=>hqPerson(-.88+index*.72,1.25-((index+1)%2)*.6,employee.color,index+1));
 }
 function renderHqPreview(now){
   if(!refs.menu.classList.contains('visible'))return;rebuildHqPreview();
@@ -1614,7 +1692,7 @@ function makePerson({ role='worker', color='#e9ad52', skin='#d6a47d', variant=0,
   const displayName=role==='client'&&state.selectedOrder?.clientPerson?state.selectedOrder.clientPerson:(['police','inspector','boss','medic'].includes(role)?names[variant%names.length]:profile.name);
   const personScale=isPlayer?.86:.64;
   person.scale.set(profile.body*personScale,profile.height*personScale,profile.body*personScale);
-  person.userData={isPerson:true,role,displayName:isPlayer?(sessionUser??'Вы'):displayName,job:isPlayer?'Технический заказчик · ваш аватар':PERSON_JOBS[role]??PERSON_JOBS.worker,leftLeg,rightLeg,leftArm,rightArm,variant,bubble,defaultBubble:bubbleText,alertBubble,selectionRing,playerAura,playerBadge,playerMarker,profile};
+  person.userData={isPerson:true,role,displayName:isPlayer?(sessionUser??'Вы'):displayName,job:isPlayer?'Генеральный директор · ваш аватар':PERSON_JOBS[role]??PERSON_JOBS.worker,leftLeg,rightLeg,leftArm,rightArm,variant,bubble,defaultBubble:bubbleText,alertBubble,selectionRing,playerAura,playerBadge,playerMarker,profile};
   requestRiggedCharacter(person,{role,color,profile,avatar,variant},legacyVisuals);
   return person;
 }
@@ -2046,7 +2124,7 @@ refs.canvas.addEventListener('pointerup',(event)=>{
     const nearbyTask=state.tasks.filter(task=>!['done','locked'].includes(task.status)).map(task=>({task,distance:destination.distanceTo(new THREE.Vector3(siteX(task.x),.03,siteZ(task.y)))})).sort((a,b)=>a.distance-b.distance)[0];
     playerMoveZoneTaskId=nearbyTask&&nearbyTask.distance<unit*footprintScale()*1.3?nearbyTask.task.id:null;
     state.playerZoneTaskId=null;playerMoveMarker.position.copy(destination);playerMoveMarker.visible=true;state.selectedTaskId=null;
-    renderTasks();renderSelection();persistGame();feedback('message');showToast('Маршрут принят. Технический заказчик наконец идёт туда, куда нажали.','done');
+    renderTasks();renderSelection();persistGame();feedback('message');showToast('Маршрут принят. Генеральный директор наконец идёт туда, куда нажали.','done');
   }
 });
 refs.canvas.addEventListener('wheel',(event)=>{event.preventDefault();cameraZoom=Math.max(.72,Math.min(1.65,cameraZoom-event.deltaY*.0007));updateCamera();},{passive:false});
@@ -2084,15 +2162,43 @@ function showResult() {
     <div class="hq-card"><small>ВАШ СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ ${state.hq?.level ?? 0}</small><strong>${state.hq?.title ?? 'Стол у принтера'}</strong><small id="hqFailure">${state.hq?.lastFailure ?? 'Клиентам строим лучше, чем себе.'}</small><button class="secondary-button" id="upgradeHq">Вложить прибыль в штаб (сомнительно)</button></div>`;
   refs.result.classList.add('visible'); persistGame();
   $('#upgradeHq').addEventListener('click',()=>{
-    const outcome=attemptHqUpgrade(state);
-    $('#hqFailure').textContent=outcome.success?`Успех: теперь это «${outcome.title}». Никто не ожидал.`:`Попытка ${outcome.attempts}: ${outcome.lastFailure}`;
-    $('#upgradeHq').textContent=outcome.success?'Попробовать испортить улучшение':'Попробовать ещё раз, ничему не научившись';
+    const outcome=startHeadquartersProject(state);
+    $('#hqFailure').textContent=outcome.ok?'Внутренний проект запущен. Теперь штаб улучшается по дням, с платежами и перерасходом.':'Штаб уже строится или в кассе нет аванса.';
+    $('#upgradeHq').textContent=outcome.ok?'Открыть штаб и следить за ремонтом':'Сначала разобраться с текущим ремонтом';
     persistGame();
   });
 }
 
 document.addEventListener('click',(event)=>{
   ensureAudio();
+  const companyTabButton=event.target.closest('[data-company-tab]');
+  if(companyTabButton){companyTab=companyTabButton.dataset.companyTab;renderCompanyConsole();return;}
+  const openProject=event.target.closest('[data-open-project]');
+  if(openProject){const result=activatePortfolioProject(state,openProject.dataset.openProject);if(result.ok){saved=state;visualProfile=createVisualProfile(state.visualSeed??1,state.selectedOrder);renderedLogLength=state.log?.length??0;resultShown=false;selectedPerson=null;clearCrewMeshes();ensureRuntimeCrews(state);unlockTasks(state);rebuildTaskMarkers();renderMainMenu();refs.menu.classList.remove('visible');resumePlayerGame();persistGame();showToast(`Открыт объект: ${state.selectedOrder?.title}. Остальные продолжают жить в фоне.`,'done');}return;}
+  const addOrderButton=event.target.closest('[data-add-portfolio-order]');
+  if(addOrderButton){const order=orders.find(item=>item.id===addOrderButton.dataset.addPortfolioOrder);if(!order)return;const projectState=createInitialState(Math.random,allRandomEvents);projectState.company={...state.company,loans:[...(state.company.loans??[])],ledger:[...(state.company.ledger??[])],obligations:[...(state.company.obligations??[])]};projectState.organization=projectState.company;projectState.hq=state.hq;projectState.playerAvatar=state.playerAvatar;if(!selectOrder(projectState,order)){showToast('Компания пока не тянет мобилизацию этого объекта. Банк уже открыл вкладку с кредитами.','risk');return;}state.company.cash=projectState.company.cash;state.organization=state.company;projectState.phase='preparation';const added=addPortfolioProject(state,projectState,'supervised');if(!added.ok){showToast(added.reason==='limit'?'Три объекта — предел текущего штаба. Четвёртый пока существует только в обещаниях.':'Этот объект уже лежит в портфеле.','risk');return;}companyTab='portfolio';renderMainMenu();persistGame();showToast(`«${order.title}» добавлен в портфель. Аванс есть, свободных людей — как получится.`,'done');return;}
+  const assignButton=event.target.closest('[data-assign-employee]');
+  if(assignButton){const select=document.querySelector(`[data-staff-project="${CSS.escape(assignButton.dataset.assignEmployee)}"]`);const projectId=select?.value;if(!projectId){const employee=state.staff.employees.find(item=>item.id===assignButton.dataset.assignEmployee);if(employee?.assignedProjectId){const old=state.portfolio.projects.find(item=>item.id===employee.assignedProjectId);if(old)old.staffIds=(old.staffIds??[]).filter(id=>id!==employee.id);employee.assignedProjectId=null;}renderCompanyConsole();persistGame();return;}const result=assignEmployee(state,assignButton.dataset.assignEmployee,projectId);if(result.ok){renderCompanyConsole();persistGame();showToast(`${result.employee.name} закреплён за «${result.project.summary.title}». В другом месте сегодня его нет.`,'done');}return;}
+  const transferButton=event.target.closest('[data-transfer-employee]');
+  if(transferButton){const select=document.querySelector(`[data-staff-project="${CSS.escape(transferButton.dataset.transferEmployee)}"]`);const result=emergencyTransferEmployee(state,transferButton.dataset.transferEmployee,select?.value);if(result.ok){renderCompanyConsole();persistGame();showToast(`Экстренная переброска: −${result.lostHours} часа и +15 стресса. Телепортацию бухгалтерия не согласовала.`,'risk');}else showToast(result.reason==='already-transferred'?'Сегодня этого человека уже перебрасывали. Он физически конечен.':'Выберите другой объект.','risk');return;}
+  const hireStaffButton=event.target.closest('[data-hire-employee]');
+  if(hireStaffButton){const result=hireEmployee(state,hireStaffButton.dataset.hireEmployee);if(result.ok){renderMainMenu();persistGame();showToast(`${result.employee.name} принят(а) в штат. ФОТ стал серьёзнее, компания — чуть менее одинокой.`,'done');}else showToast('Не хватает денег даже на выход сотрудника. Собеседование прошло особенно честно.','risk');return;}
+  const dismissStaffButton=event.target.closest('[data-dismiss-employee]');
+  if(dismissStaffButton){const result=dismissEmployee(state,dismissStaffButton.dataset.dismissEmployee);if(result.ok){renderMainMenu();persistGame();showToast(`${result.employee.name} уволен(а). Память компании уменьшилась сразу.`,'risk');}else showToast('Не хватает денег на расчёт при увольнении. Даже расстаться дорого.','risk');return;}
+  const outsourceButton=event.target.closest('[data-outsource-role]');
+  if(outsourceButton){const result=toggleOutsourcedRole(state,outsourceButton.dataset.outsourceRole);if(result.ok){renderCompanyConsole();persistGame();showToast(result.active?'Функция выведена на аутсорс. Ответ обещали в течение SLA.':'Функция возвращена внутрь компании. Теперь нужен живой человек.');}return;}
+  const payButton=event.target.closest('[data-pay-obligation]');
+  if(payButton){const result=settleObligation(state,payButton.dataset.payObligation);if(result.ok){renderMainMenu();persistGame();feedback('cash');showToast(`Оплачено ${money(result.amount)}. Контрагент снова отвечает без многоточий.`,'done');}else showToast(`В кассе не хватает ${money(result.needed??0)}.`,'risk');return;}
+  const reserveButton=event.target.closest('[data-reserve]');
+  if(reserveButton){const amount=Number(reserveButton.dataset.reserve);if(amount>0&&state.company.cash<amount){showToast('В резерв нечего откладывать. Он пока состоит из намерений.','risk');return;}postLedgerEntry(state,{type:amount>0?'reserve-in':'reserve-out',category:'Резерв',amount:Math.abs(amount),text:amount>0?'Отчисление в финансовую подушку':'Использование финансовой подушки'});renderMainMenu();persistGame();return;}
+  const hqProjectButton=event.target.closest('[data-start-hq-project]');
+  if(hqProjectButton){const result=startHeadquartersProject(state);if(result.ok){hqPreviewKey='';renderMainMenu();persistGame();showToast('Свой офис официально стал ещё одним объектом. Наконец-то проблемы дома.','done');}else showToast(result.reason==='active'?'Штаб уже ремонтируется. Вторая бригада только увеличит число коробок.':'Не хватает аванса на ремонт собственного офиса. Символично.','risk');return;}
+  const materialButton=event.target.closest('[data-order-materials]');
+  if(materialButton){const project=state.portfolio.projects.find(item=>item.id===materialButton.dataset.orderMaterials);const taskIds=(project?.snapshot.tasks??[]).filter(task=>!['done','skipped'].includes(task.status)).slice(0,3).map(task=>task.id);const result=createMaterialOrder(state,materialButton.dataset.orderMaterials,{title:`Комплект для ${project?.summary.title??'объекта'}`,taskIds,amount:45+taskIds.length*12,leadDays:2,paymentTermsDays:3,certificates:true});if(result.ok){renderMainMenu();persistGame();showToast(`Материалы заказаны. Поставка через ${result.order.deliveryDay-state.companyCalendar.day} дня, оплата чуть позже — так рождается кредиторка.`,'done');}return;}
+  const createChangeButton=event.target.closest('[data-create-change]');
+  if(createChangeButton){const result=createChangeOrder(state,createChangeButton.dataset.createChange);if(result.ok){renderMainMenu();persistGame();showToast(result.change.description,'risk');}return;}
+  const resolveChangeButton=event.target.closest('[data-resolve-change]');
+  if(resolveChangeButton){const [projectId,changeId,strategy]=resolveChangeButton.dataset.resolveChange.split(':');const result=resolveChangeOrder(state,projectId,changeId,strategy);if(result.ok){renderMainMenu();persistGame();showToast(result.approved?'Изменение согласовано с деньгами и сроком. Почти фантастика.':'Изменение принято в работу. Кто платит — сюжет следующей серии.',result.approved?'done':'risk');}return;}
   const closeSelection=event.target.closest('[data-close-selection]');
   if(closeSelection){selectedPerson=null;state.selectedTaskId=null;renderSelection();return;}
   const avatarControl=event.target.closest('[data-avatar-color],[data-avatar-outfit],[data-avatar-helmet]');
@@ -2182,6 +2288,12 @@ document.addEventListener('click',(event)=>{
   if(event.target.closest('[data-close-sidebook]'))event.target.closest('.modal-backdrop').classList.remove('visible');
 });
 
+document.addEventListener('change',(event)=>{
+  const delegation=event.target.closest('[data-delegation-project]');if(!delegation)return;
+  const result=setProjectDelegation(state,delegation.dataset.delegationProject,delegation.value);
+  if(result.ok){renderCompanyConsole();persistGame();showToast(delegation.value==='manual'?'Объект переведён в ручной режим. Телефон уже вибрирует.':delegation.value==='autonomous'?'Объект отдан команде. В отчётах всё будет выглядеть спокойнее, чем на площадке.':'Команда действует сама, но отклонения приносит вам.','done');}
+});
+
 $('#acceptOrder').addEventListener('click',()=>{
   const order=orders.find(item=>item.id===selectedOrderId);if(!order)return;if(!selectOrder(state,order)){const organization=ensureOrganization(state);showToast((order.requiredLevel??1)>organization.playerLevel?`Нужен уровень ${order.requiredLevel}. Улучшайте штаб и закрывайте проекты.`:(order.requiresProjects??0)>organization.projectsCompleted?'Этот заказ откроется после предыдущей главы.':'Не хватает оборотных денег организации. Кредит доступен и в финансах объекта.','risk');feedback('risk');return;}
   visualProfile=createVisualProfile(order.visualSeed,order);
@@ -2212,20 +2324,20 @@ $('#masterScheduleButton').addEventListener('click',openMasterSchedule);
 $('#topScheduleButton').addEventListener('click',openMasterSchedule);
 $('#closeSchedule').addEventListener('click',closeMasterSchedule);
 $('#closeSituation').addEventListener('click',()=>{refs.situation.classList.remove('visible');openSituationId=null;state.paused=situationWasPaused;showToast('Вопрос оставлен висеть над человеком. Буквально.');});
-$('#sendReport').addEventListener('click',()=>{const day=Math.floor(state.elapsed/24);const revision=resolveScheduleRevision(state,selectedScheduleRoute??'restore',eveningScheduleSnapshot);const dailyCost=closeDayFinances(state);state.reportedDay=day;state.elapsed=(day+1)*24;state.needsReport=false;state.needsPlanning=true;state.paused=true;for(const task of state.tasks)task.enabledToday=false;refs.report.classList.remove('visible');eveningScheduleSnapshot=null;eveningScheduleDay=-1;selectedScheduleRoute=null;renderDayPlan();refs.planning.classList.add('visible');const revisionText=revision.changed?(revision.mode==='client'?(revision.approved?' Заказчик согласовал новую версию графика.':' Заказчик отклонил правки — вернули базу.'):(revision.mode==='secret'?(revision.detected?' Тайную правку заметили.':' Тихая версия графика вступила в силу.'):' Правки отменены.')):'';showToast(`Отчёт ушёл. За день списано ${money(dailyCost)}.${revisionText}`,'done');persistGame();});
+$('#sendReport').addEventListener('click',()=>{const day=Math.floor(state.elapsed/24);const revision=resolveScheduleRevision(state,selectedScheduleRoute??'restore',eveningScheduleSnapshot);const dailyCost=closeDayFinances(state);state.reportedDay=day;state.elapsed=(day+1)*24;state.needsReport=false;state.needsPlanning=true;state.paused=true;for(const task of state.tasks)task.enabledToday=false;const companyDay=advanceCompanyDay(state);refs.report.classList.remove('visible');eveningScheduleSnapshot=null;eveningScheduleDay=-1;selectedScheduleRoute=null;renderDayPlan();refs.planning.classList.add('visible');const revisionText=revision.changed?(revision.mode==='client'?(revision.approved?' Заказчик согласовал новую версию графика.':' Заказчик отклонил правки — вернули базу.'):(revision.mode==='secret'?(revision.detected?' Тайную правку заметили.':' Тихая версия графика вступила в силу.'):' Правки отменены.')):'';const portfolioText=companyDay.background.length?` Фоновых объектов посчитано: ${companyDay.background.length}.`:'';const crisisText=companyDay.crisis?` КРИЗИС: ${companyDay.crisis.reason}, на спасение ${companyDay.crisis.deadlineDay-companyDay.day} дней.`:'';showToast(`Отчёт ушёл. За день объекта списано ${money(dailyCost)}.${revisionText}${portfolioText}${crisisText}`,companyDay.crisis?'risk':'done');persistGame();});
 $('#briefButton').addEventListener('click',()=>state.selectedOrder?refs.brief.classList.add('visible'):refs.orders.classList.add('visible'));
 $('#pauseButton').addEventListener('click',()=>{if(!state.started)return;state.paused=!state.paused;renderHud();});
 $('#endDayButton').addEventListener('click',()=>{if(!state.started||state.completed){showToast('Сначала выйдите на объект. Заканчивать рынок заказов рано.','risk');return;}state.paused=true;state.needsReport=true;openReport();renderHud();persistGame();showToast('Смена остановлена. Вечерний Excel уже требует внимания.','risk');});
 $('#soundToggle').addEventListener('click',()=>{audioEnabled=!audioEnabled;$('#soundToggle').textContent=audioEnabled?'♪':'×';$('#soundToggle').title=audioEnabled?'Звук включён':'Звук выключен';if(audioEnabled)playSound('click');});
 $('#skipTutorial').addEventListener('click',()=>{if(state.tutorial){state.tutorial.active=false;state.tutorial.completed=true;}renderTutorial();persistGame();showToast('Обучение пропущено. События снова имеют доступ к объекту.','risk');});
-$('#developHqButton').addEventListener('click',()=>{const outcome=developHeadquarters(state);if(!outcome.ok){showToast('На офис для себя снова не хватило денег. Символично.','risk');return;}feedback(outcome.success?'done':'risk');renderMainMenu();persistGame();showToast(outcome.success?`Собственный офис улучшен: ${outcome.title}.`:`Потрачено ${money(outcome.cost)}. ${outcome.lastFailure}`,outcome.success?'done':'risk');});
+$('#developHqButton').addEventListener('click',()=>{const outcome=startHeadquartersProject(state);if(!outcome.ok){showToast(outcome.reason==='active'?'Ремонт штаба уже идёт. Вторая бригада просит отдельный штаб.':'На аванс собственного ремонта снова не хватило денег. Символично.','risk');return;}feedback('build');companyTab='office';renderMainMenu();persistGame();showToast('Улучшение штаба запущено как внутренний проект. Результат появится физически после выполнения.','done');});
 $('#designOfficeButton').addEventListener('click',()=>{const outcome=toggleInHouseDesign(state);if(!outcome.ok){showToast(outcome.reason==='hq-level'?'Сначала нужен штаб уровня 2. Проектировщики отказываются сидеть у принтера.':outcome.reason==='active-project'?'Штат меняют между проектами, а не во время горящего выпуска.':'В кассе нет 240К на постоянный проектный отдел.','risk');return;}renderMainMenu();renderAll();persistGame();feedback(outcome.active?'cash':'message');showToast(outcome.active?'Проектный отдел принят в штат: 12К операционных расходов каждый день, отдельный подрядчик больше не обязателен.':'Проектный отдел распущен. Операционные расходы упали, память организации тоже.','done');});
 document.querySelectorAll('[data-speed]').forEach(button=>button.addEventListener('click',()=>{state.speed=Number(button.dataset.speed);state.paused=false;renderHud();}));
 $('#zoomIn').addEventListener('click',()=>{cameraZoom=Math.min(1.65,cameraZoom+.12);updateCamera();});
 $('#zoomOut').addEventListener('click',()=>{cameraZoom=Math.max(.72,cameraZoom-.12);updateCamera();});
 $('#zoomReset').addEventListener('click',()=>{cameraAngle=Math.PI/4;cameraZoom=1;updateCamera();});
-function resetGame(){const hq=state.hq;const playerAvatar=state.playerAvatar;const organization=ensureOrganization(state);state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.playerAvatar=playerAvatar;state.organization=organization;ensureWorkforceMarket(state);saved=null;eveningScheduleSnapshot=null;eveningScheduleDay=-1;eveningEditing=false;selectedScheduleRoute=null;orders=createOrderMarket(organization);state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0].id;visualProfile=createVisualProfile(1);unlockTasks(state);renderedLogLength=0;resultShown=false;clearCrewMeshes();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();}
-function cancelCurrentOrder(){if(state.started){showToast('После выхода на площадку отказаться можно только через «сохранить и выйти».','risk');return;}const organization=ensureOrganization(state);const refund=Math.round((state.organizationMobilization??0)*.5);organization.cash+=refund;const hq=state.hq;const playerAvatar=state.playerAvatar;const currentOrders=orders;state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.playerAvatar=playerAvatar;state.organization=organization;ensureWorkforceMarket(state);state.orderOptions=currentOrders;orders=currentOrders;selectedOrderId=orders.find(order=>(order.requiredLevel??1)<=organization.playerLevel&&(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0]?.id;saved=null;visualProfile=createVisualProfile(1);renderedLogLength=0;resultShown=false;clearCrewMeshes();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();showToast(`От заказа отказались. Вернули ${money(refund)}, остальное ушло в опыт переговоров.`,'risk');}
+function resetGame(){const hq=state.hq;const playerAvatar=state.playerAvatar;const organization=ensureOrganization(state);const staff=state.staff;const network=state.contractorNetwork;const calendar=state.companyCalendar;state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.playerAvatar=playerAvatar;state.company=organization;state.organization=organization;state.staff=staff;state.contractorNetwork=network;state.companyCalendar=calendar;state.portfolio={projects:[],activeProjectId:null,maxActive:3,archive:state.portfolio?.archive??[]};ensureGameSaveV2(state);ensureWorkforceMarket(state);saved=null;eveningScheduleSnapshot=null;eveningScheduleDay=-1;eveningEditing=false;selectedScheduleRoute=null;orders=createOrderMarket(organization);state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0].id;visualProfile=createVisualProfile(1);unlockTasks(state);renderedLogLength=0;resultShown=false;clearCrewMeshes();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();}
+function cancelCurrentOrder(){if(state.started){showToast('После выхода на площадку отказаться можно только через «сохранить и выйти».','risk');return;}const organization=ensureOrganization(state);const refund=Math.round((state.organizationMobilization??0)*.5);if(refund)postLedgerEntry(state,{type:'income',category:'Возврат мобилизации',amount:refund,projectId:state.selectedOrder?.id,text:'Частичный возврат после отказа от заказа'});const hq=state.hq;const playerAvatar=state.playerAvatar;const currentOrders=orders;const staff=state.staff;const network=state.contractorNetwork;const portfolio=state.portfolio;const calendar=state.companyCalendar;state=createInitialState(Math.random,allRandomEvents);state.hq=hq;state.playerAvatar=playerAvatar;state.company=organization;state.organization=organization;state.staff=staff;state.contractorNetwork=network;state.portfolio=portfolio;state.companyCalendar=calendar;ensureGameSaveV2(state);ensureWorkforceMarket(state);state.orderOptions=currentOrders;orders=currentOrders;selectedOrderId=orders.find(order=>(order.requiredLevel??1)<=organization.playerLevel&&(order.requiresProjects??0)<=organization.projectsCompleted)?.id??orders[0]?.id;saved=null;visualProfile=createVisualProfile(1);renderedLogLength=0;resultShown=false;clearCrewMeshes();for(const modal of document.querySelectorAll('.modal-backdrop'))modal.classList.remove('visible');refs.orders.classList.add('visible');rebuildTaskMarkers();renderAll();persistGame();showToast(`От заказа отказались. Вернули ${money(refund)}, остальное ушло в опыт переговоров.`,'risk');}
 $('#resetButton').addEventListener('click',resetGame);
 $('#playAgain').addEventListener('click',()=>{refs.result.classList.remove('visible');saved=null;renderMainMenu();refs.menu.classList.add('visible');});
 $('#continueGameButton').addEventListener('click',()=>{if(saved)resumePlayerGame();});

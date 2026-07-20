@@ -16,7 +16,7 @@ PORT = int(os.environ.get("FITOUT_PORT", "4188"))
 DATA_DIR = Path(os.environ.get("FITOUT_DATA_DIR", "/var/lib/fitout"))
 DB_PATH = DATA_DIR / "players.json"
 SECRET_PATH = DATA_DIR / "session-secret"
-MAX_BODY = 1_500_000
+MAX_BODY = 5_000_000
 LOCK = threading.Lock()
 ATTEMPTS = {}
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -150,7 +150,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not name:
                     return self.send_json(401, {"error": "Нужно войти заново."})
                 state = self.read_json().get("state")
-                if not isinstance(state, dict) or not isinstance(state.get("tasks"), list):
+                legacy_valid = isinstance(state, dict) and isinstance(state.get("tasks"), list)
+                v2_valid = isinstance(state, dict) and state.get("schemaVersion") == 2 and isinstance(state.get("company"), dict) and isinstance((state.get("portfolio") or {}).get("projects"), list) and len((state.get("portfolio") or {}).get("projects")) <= 3 and isinstance((state.get("staff") or {}).get("employees"), list)
+                if not legacy_valid and not v2_valid:
                     return self.send_json(400, {"error": "Сохранение повреждено."})
                 with LOCK:
                     db = read_db()

@@ -18,6 +18,7 @@ test('every delegated button family has a matching click route',()=>{
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
     'task','priority','start-task','skip-task','hire','contract-manpower','event-choice','situation-choice','close-modal','close-sidebook',
+    'company-tab','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','order-materials','create-change','resolve-change',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
 });
@@ -34,4 +35,10 @@ test('selected player has click-to-move navigation and never joins idle wanderin
 test('site animation time advances only while the simulation is unpaused',()=>{
   assert.match(script,/if\(!state\.paused\)sceneAnimationTime\+=frameDelta/);
   assert.match(script,/const characterDelta=state\.paused\?0:frameDelta/);
+});
+
+test('assigned permanent staff are mirrored into the active 3D site',()=>{
+  assert.match(script,/function syncAssignedStaffToActiveProject\(\)/);
+  assert.match(script,/const crewId=`company-\$\{employee\.id\}`/);
+  assert.match(script,/syncAssignedStaffToActiveProject\(\);\s+renderOrders/);
 });

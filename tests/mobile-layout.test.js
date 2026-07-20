@@ -22,3 +22,11 @@ test('tutorial does not cover main-menu or unrelated modal actions', () => {
   assert.match(game, /activeModal&&\(!target\|\|!activeModal\.contains\(target\)\)/);
   assert.match(game, /coach\.dataset\.placement=.*\?'top':'bottom'/);
 });
+
+test('mobile headquarters scrolls as one sheet and keeps game actions before long company cards',()=>{
+  assert.match(css,/\.main-menu-modal \{ grid-template-columns: 1fr;[^}]+overflow-y:auto;[^}]+-webkit-overflow-scrolling:touch;/);
+  assert.match(css,/\.main-menu-actions \.menu-button \{ order:1; \}/);
+  assert.match(css,/\.main-menu-actions \.organization-card, \.main-menu-actions \.company-console, \.main-menu-actions \.hq-menu-card, \.main-menu-actions \.source-links \{ order:2; \}/);
+  assert.match(css,/\.company-tabs \{ display:flex; overflow-x:auto;/);
+  assert.match(css,/\.company-console-content \{ max-height:none; min-height:240px; overflow:visible; \}/);
+});

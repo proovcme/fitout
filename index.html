@@ -14,7 +14,7 @@
       <header class="topbar">
         <div class="brand" aria-label="FITOUT">
           <span class="brand-mark">F</span>
-          <span class="brand-copy"><strong>FITOUT</strong><small>технический заказчик · v0.0.10</small></span>
+          <span class="brand-copy"><strong>FITOUT</strong><small>генеральный подрядчик · v0.1.0</small></span>
         </div>
 
         <div class="mission-label">
@@ -164,7 +164,7 @@
           <p>Клиентам строим офисы.<br>Себе пока заводим аккаунт.</p>
         </div>
         <form class="auth-form" id="authForm">
-          <span class="eyebrow">FITOUT · ПРОФИЛЬ ТЕХЗАКАЗЧИКА</span>
+          <span class="eyebrow">FITOUT · ПРОФИЛЬ ГЕНПОДРЯДЧИКА</span>
           <h1 id="authTitle">Сначала представьтесь</h1>
           <p>Профиль хранит текущий объект и историю прохождений. Заказчики забудут обещания, сервер — нет.</p>
           <label>ИМЯ ИГРОКА<input id="authName" name="username" autocomplete="username" minlength="2" maxlength="28" placeholder="Например, Прораб_77" required></label>
@@ -192,6 +192,18 @@
             <header><span><small>ВАША ОРГАНИЗАЦИЯ</small><strong id="organizationName">ООО «Потом согласуем»</strong></span><b id="organizationCash">320 000 ₽</b></header>
             <div class="organization-metrics"><span><small>УРОВЕНЬ</small><b id="organizationLevel">1</b></span><span><small>ДОЛГ</small><b id="organizationDebt">0 ₽</b></span><span><small>ПРОЕКТЫ</small><b id="organizationProjects">0</b></span><span><small>РЕПУТАЦИЯ</small><b id="organizationReputation">50</b></span></div>
             <div class="loan-actions"><span>В кассу организации</span><button type="button" data-loan="300" data-loan-recipient="organization">300К · 28К/мес</button><button type="button" data-loan="800" data-loan-recipient="organization">800К · 53К/мес</button></div>
+          </section>
+          <section class="company-console" aria-label="Управление компанией">
+            <header class="company-console-head"><span><small>ЕДИНЫЙ ДЕНЬ КОМПАНИИ</small><strong id="companyDayLabel">День 1 · портфель на паузе</strong></span><b id="companyAlertCount">0 вопросов</b></header>
+            <nav class="company-tabs" aria-label="Разделы штаба">
+              <button type="button" class="active" data-company-tab="portfolio">Портфель</button>
+              <button type="button" data-company-tab="staff">Команда</button>
+              <button type="button" data-company-tab="contractors">Подрядчики</button>
+              <button type="button" data-company-tab="finance">Финансы</button>
+              <button type="button" data-company-tab="market">Рынок</button>
+              <button type="button" data-company-tab="office">Офис</button>
+            </nav>
+            <div class="company-console-content" id="companyConsoleContent"></div>
           </section>
           <section class="hq-menu-card" aria-label="Собственный офис">
             <span><small>СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ <b id="hqLevel">0</b></small><strong id="hqTitle">Стол у принтера</strong><em id="hqStatus">Клиентам строим лучше, чем себе.</em></span>
