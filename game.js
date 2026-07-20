@@ -18,12 +18,14 @@ import {
   ensureRuntimeCrews,
   ensureWorkforceMarket,
   forceAssignCrew,
+  hardTaskBlockers,
   getResult,
   getRisk,
   hireContractor,
   hireTeamMember,
   ensureMasterSchedule,
   moveMasterScheduleTask,
+  pauseTask,
   restoreState,
   requestClientFunding,
   resolveSituation,
@@ -491,7 +493,7 @@ function renderDayPlan() {
   const candidates=scheduledTasksForDay(state,dayIndex);
   const hasSelectedTask=candidates.some(task=>task.enabledToday&&!['done','active'].includes(task.status));
   $('#planningTitle').textContent=`День ${dayIndex+1}: что сегодня действительно важно?`;
-  $('#dayPlanList').innerHTML=candidates.map(task=>`<button class="day-plan-card ${task.enabledToday?'selected':''}" data-day-task="${task.id}"><span class="task-status" style="--task-color:${task.color}">${ICONS[task.reworkOf?'clean':task.id]??'↺'}</span><span><strong>${task.title}</strong><small>${task.duration} ч · ${SKILL_LABELS[task.skill]}${task.outOfSequence?' · РИСК ПОСЛЕДОВАТЕЛЬНОСТИ':''}</small></span><b>P${task.priority}</b></button>`).join('');
+  $('#dayPlanList').innerHTML=candidates.map(task=>{const blockers=hardTaskBlockers(state,task);return `<button class="day-plan-card ${task.enabledToday?'selected':''}" data-day-task="${task.id}"><span class="task-status" style="--task-color:${task.color}">${ICONS[task.reworkOf?'clean':task.id]??'↺'}</span><span><strong>${task.title}</strong><small>${task.duration} ч · ${SKILL_LABELS[task.skill]}${blockers.length?` · БЛОК: ${blockers.map(item=>item.short).join(', ')}`:task.outOfSequence?' · РИСК ПОСЛЕДОВАТЕЛЬНОСТИ':''}</small></span><b>P${task.priority}</b></button>`;}).join('');
   if(!candidates.length)$('#dayPlanList').innerHTML='<div class="empty-day-plan">На этот день незавершённых работ по графику нет. Редкий управленческий успех.</div>';
   $('#startDay').disabled=!hasSelectedTask;
 }
@@ -509,11 +511,11 @@ function renderMasterSchedule() {
   const header=Array.from({length:dayCount},(_,index)=>`<span>Д${index+1}</span>`).join('');
   $('#scheduleCalendar').innerHTML=`<div class="schedule-days"><span>РАБОТА</span><div>${header}</div><span>НАСТРОЙКА</span></div>${ordered.map((task,index)=>{
     const [stage,stageClass]=scheduleStage(task);const start=Math.min(dayCount-1,task.plannedStartDay);const finish=Math.min(dayCount-1,task.plannedFinishDay);const left=start/dayCount*100;const width=Math.max(100/dayCount,(finish-start+1)/dayCount*100);
-    const conflict=task.deps.some(id=>(state.tasks.find(item=>item.id===id)?.plannedFinishDay??0)>task.plannedStartDay);
-    return `<article class="schedule-row ${conflict?'conflict':''}" data-schedule-row="${task.id}"><div class="schedule-task"><span>${String(index+1).padStart(2,'0')}</span><div><strong>${task.title}</strong><small>${stage} · ${task.duration} ч${conflict?' · КОНФЛИКТ ЗАВИСИМОСТИ':''}</small></div></div><div class="schedule-track" style="--schedule-days:${dayCount}"><i class="${stageClass}" style="left:${left}%;width:${width}%"><b>${Math.round(task.progress*100)}%</b></i></div><div class="schedule-controls"><button data-schedule-order="-1" data-schedule-task="${task.id}" aria-label="Поднять работу">↑</button><button data-schedule-day="-1" data-schedule-task="${task.id}" aria-label="Сдвинуть раньше">−</button><b>Д${task.plannedStartDay+1}</b><button data-schedule-day="1" data-schedule-task="${task.id}" aria-label="Сдвинуть позже">+</button><button data-schedule-order="1" data-schedule-task="${task.id}" aria-label="Опустить работу">↓</button></div></article>`;
+    const conflict=task.deps.some(id=>(state.tasks.find(item=>item.id===id)?.plannedFinishDay??0)>task.plannedStartDay);const hardConflict=(task.hardDeps??[]).some(id=>(state.tasks.find(item=>item.id===id)?.plannedFinishDay??0)>task.plannedStartDay);
+    return `<article class="schedule-row ${conflict?'conflict':''}" data-schedule-row="${task.id}"><div class="schedule-task"><span>${String(index+1).padStart(2,'0')}</span><div><strong>${task.title}</strong><small>${stage} · ${task.duration} ч${hardConflict?' · ЖЁСТКИЙ БЛОКЕР':conflict?' · РИСК ПОСЛЕДОВАТЕЛЬНОСТИ':''}</small></div></div><div class="schedule-track" style="--schedule-days:${dayCount}"><i class="${stageClass}" style="left:${left}%;width:${width}%"><b>${Math.round(task.progress*100)}%</b></i></div><div class="schedule-controls"><button data-schedule-order="-1" data-schedule-task="${task.id}" aria-label="Поднять работу">↑</button><button data-schedule-day="-1" data-schedule-task="${task.id}" aria-label="Сдвинуть раньше">−</button><b>Д${task.plannedStartDay+1}</b><button data-schedule-day="1" data-schedule-task="${task.id}" aria-label="Сдвинуть позже">+</button><button data-schedule-order="1" data-schedule-task="${task.id}" aria-label="Опустить работу">↓</button></div></article>`;
   }).join('')}`;
-  const conflicts=ordered.filter(task=>task.deps.some(id=>(state.tasks.find(item=>item.id===id)?.plannedFinishDay??0)>task.plannedStartDay)).length;
-  $('#scheduleWarning').textContent=conflicts?`${conflicts} конфликт(а) зависимостей. Принять можно — переделки тоже можно.`:'Зависимости согласованы. Изменения попадут в утренние планёрки.';
+  const conflicts=ordered.filter(task=>task.deps.some(id=>(state.tasks.find(item=>item.id===id)?.plannedFinishDay??0)>task.plannedStartDay)).length;const hardConflicts=ordered.filter(task=>(task.hardDeps??[]).some(id=>(state.tasks.find(item=>item.id===id)?.plannedFinishDay??0)>task.plannedStartDay)).length;
+  $('#scheduleWarning').textContent=hardConflicts?`${hardConflicts} жёстких конфликт(а): график сохранить можно, но фронт физически не стартует до снятия блокера.`:conflicts?`${conflicts} мягких конфликт(а). Принять можно — переделки тоже можно.`:'Зависимости согласованы. Изменения попадут в утренние планёрки.';
 }
 
 function openMasterSchedule() {
@@ -655,9 +657,12 @@ function taskProblem(task) {
   if(crew&&(crew.unavailableUntil??0)>state.elapsed)return 'Исполнитель временно снят с объекта';
   if(task.outOfSequence&&task.status!=='done')return 'Риск: работа начата раньше зависимостей';
   if(task.status==='locked') {
+    const hard=hardTaskBlockers(state,task).map(item=>item.short);
+    if(hard.length)return `Жёсткий блокер: сначала ${hard.join(', ')}`;
     const waiting=task.deps.map(id=>state.tasks.find(item=>item.id===id)?.short).filter(Boolean);
     return waiting.length?`Ждёт: ${waiting.join(', ')}`:'Ждёт предыдущие работы';
   }
+  if(task.manualPaused)return `Приостановлено на ${Math.round((task.progress??0)*100)}% · бригада освобождена`;
   if(task.status==='ready'&&state.started&&!state.crews.some(item=>item.skill===task.skill||item.skill==='general'))return `Нет исполнителя: ${SKILL_LABELS[task.skill]}`;
   if(task.status==='ready'&&state.started&&!task.enabledToday)return 'Не включено в план текущего дня';
   return '';
@@ -670,6 +675,7 @@ function taskStatus(task) {
   if(task.status==='active')return ['ИДЁТ','active'];
   if(task.status==='blocked')return ['ПРОБЛЕМА','problem'];
   if(task.status==='locked')return ['ОЖИДАЕТ','waiting'];
+  if(task.manualPaused)return ['ПАУЗА','waiting'];
   if(task.enabledToday)return ['В ПЛАНЕ','planned'];
   return ['К СТАРТУ','ready'];
 }
@@ -685,7 +691,8 @@ function renderTasks() {
         <span class="task-title-row"><strong>${task.title}</strong><b class="task-state ${statusClass}">${statusLabel}</b></span>
         <span class="task-progress-row"><i><em style="width:${percent}%"></em></i><b>${percent}%</b><small>${SKILL_LABELS[task.skill]} · ${task.duration} ч</small></span>
         ${issue?`<span class="task-problem">! ${issue}</span>`:''}
-        ${task.status==='ready'&&!task.enabledToday?`<button class="task-start-button" data-start-task="${task.id}">Включить сегодня · начать</button>`:''}
+        ${task.status==='ready'&&!task.enabledToday?`<button class="task-start-button" data-start-task="${task.id}">${task.manualPaused?'Возобновить работы':'Включить сегодня · начать'}</button>`:''}
+        ${task.status==='active'?`<button class="task-stop-button" data-stop-task="${task.id}">Остановить работы</button>`:''}
         ${task.optional&&['ready','locked','blocked'].includes(task.status)?`<button class="task-skip-button" data-skip-task="${task.id}">Сэкономить · пропустить с риском</button>`:''}
         ${task.status==='awaiting'?`<button class="acceptance-button" data-submit-task="${task.id}">Предъявить работу · попытка ${(task.acceptanceAttempts??0)+1}</button>`:''}
       </span>
@@ -2234,7 +2241,7 @@ document.addEventListener('click',(event)=>{
   const replacement=event.target.closest('[data-replace-contractor]');
   if(replacement){const result=hireContractor(state,replacement.dataset.replaceContractor);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(`${result.contractor.company}: оплачены, выйдут завтра. Профиль уже никто не проверяет.`,'done');}else if(result.reason==='budget')showToast('На донабор не хватает денег объекта.','risk');}
   const forceAssign=event.target.closest('[data-force-assign]');
-  if(forceAssign){const select=document.querySelector(`[data-assignment-select="${CSS.escape(forceAssign.dataset.forceAssign)}"]`);const result=forceAssignCrew(state,forceAssign.dataset.forceAssign,select?.value);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(result.mismatch?'Нагнали непрофильного специалиста: темп 55%, качество под вопросом.':'Фронт усилен профильной командой.','risk');}else showToast(result.reason==='budget'?'На этот нагон не хватает денег.':'Этот фронт уже занят или человек ещё не вышел.','risk');}
+  if(forceAssign){const select=document.querySelector(`[data-assignment-select="${CSS.escape(forceAssign.dataset.forceAssign)}"]`);const result=forceAssignCrew(state,forceAssign.dataset.forceAssign,select?.value);if(result.ok){renderTeamBook();renderAll();persistGame();showToast(result.mismatch?'Нагнали непрофильного специалиста: темп 55%, качество под вопросом.':'Фронт усилен профильной командой.','risk');}else showToast(result.reason==='budget'?'На этот нагон не хватает денег.':result.reason==='hard-blocker'?`Физический блокер: сначала ${result.blockers.map(item=>item.short).join(', ')}.`:'Этот фронт уже занят или человек ещё не вышел.','risk');}
   const dayTask=event.target.closest('[data-day-task]');
   if(dayTask){const task=state.tasks.find(item=>item.id===dayTask.dataset.dayTask);if(task){if(task.enabledToday)cyclePriority(state,task.id);else task.enabledToday=true;renderDayPlan();}}
   const skipTaskButton=event.target.closest('[data-skip-task]');
@@ -2267,12 +2274,14 @@ document.addEventListener('click',(event)=>{
   if(startTaskButton){
     event.stopPropagation();const task=state.tasks.find(item=>item.id===startTaskButton.dataset.startTask);
     if(task?.status==='ready'){
-      task.enabledToday=true;task.priority=Math.max(2,task.priority);const available=state.crews.find(crew=>(crew.unavailableUntil??0)<=state.elapsed&&!crew.taskId&&(crew.skill===task.skill||crew.skill==='general'));
+      task.enabledToday=true;task.manualPaused=false;task.priority=Math.max(2,task.priority);const available=state.crews.find(crew=>(crew.unavailableUntil??0)<=state.elapsed&&!crew.taskId&&(crew.skill===task.skill||crew.skill==='general'));
       renderAll();persistGame();feedback('message');showToast(available?`«${task.short}» включена в план. Свободная бригада выходит на фронт.`:`«${task.short}» включена в план и ждёт подходящую свободную бригаду.`,available?'done':'risk');
     }
   }
+  const stopTaskButton=event.target.closest('[data-stop-task]');
+  if(stopTaskButton){event.stopPropagation();const result=pauseTask(state,stopTaskButton.dataset.stopTask);if(result.ok){renderAll();persistGame();feedback('message');showToast(`«${result.task.short}» остановлена на ${Math.round(result.task.progress*100)}%. ${result.crew?.name??'Бригада'} освобождена.`,'risk');}}
   const taskCard=event.target.closest('[data-task]');
-  if(taskCard&&!event.target.closest('[data-priority],[data-submit-task],[data-start-task]')){selectedPerson=null;state.selectedTaskId=taskCard.dataset.task;renderTasks();renderSelection();}
+  if(taskCard&&!event.target.closest('[data-priority],[data-submit-task],[data-start-task],[data-stop-task]')){selectedPerson=null;state.selectedTaskId=taskCard.dataset.task;renderTasks();renderSelection();}
   const priority=event.target.closest('[data-priority]');
   if(priority){event.stopPropagation(); if(cyclePriority(state,priority.dataset.priority)){renderTasks();showToast('Приоритет изменён. Прораб многозначительно переставил стикер.');}}
   const submitTask=event.target.closest('[data-submit-task]');

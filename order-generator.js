@@ -108,6 +108,7 @@ export function buildTasksForOrder(order) {
     duration:Math.max(2,Math.min(Math.round((order.deadlineHours??96)*.22),Math.round(work.baseDuration*areaFactor*complexityFactor))),
     cost:Math.max(6,Math.round((order.budget??900)*.58*work.costWeight/totalWeight)),
     deps:work.after.filter(id=>selected.has(id)),
+    hardDeps:(work.hardAfter??[]).filter(id=>selected.has(id)),
     priority:work.category==='design'?3:['handover','finish'].includes(work.category)?1:2,
     progress:0,status:'locked',crewId:null,committed:false,enabledToday:false,scheduleOrder:index,
   }));

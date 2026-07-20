@@ -18,6 +18,7 @@ import {
   forceAssignCrew,
   hireContractor,
   hireTeamMember,
+  pauseTask,
   selectOrder,
   requestClientFunding,
   resolveScheduleRevision,
@@ -350,9 +351,23 @@ test('chat pressure is repeatable while a hard email is limited to once per day'
 });
 
 test('the company general crew can cover every trade slowly and specialists can be forced off profile',()=>{
-  const state=createInitialState();state.started=true;const general=state.crews.find(item=>item.id==='general-crew');const paint=state.tasks.find(item=>item.id==='paint');paint.status='ready';
+  const state=createInitialState();state.started=true;const general=state.crews.find(item=>item.id==='general-crew');const paint=state.tasks.find(item=>item.id==='paint');state.tasks.find(item=>item.id==='prep').status='done';paint.status='ready';
   const assigned=forceAssignCrew(state,general.id,paint.id);assert.equal(assigned.ok,true);assert.equal(assigned.mismatch,true);
   assert.equal(paint.profileMismatch,true);
+});
+
+test('demolition is a hard physical blocker while design remains an accepted sequence risk',()=>{
+  const state=createInitialState(makeSeededRng(27),allRandomEvents);const renovation=generateOrders(makeSeededRng(27),2)[1];assert.equal(selectOrder(state,renovation),true);state.started=true;
+  for(const id of ['move','protection','temporary-networks']){const task=state.tasks.find(item=>item.id===id);if(task)task.status='done';}
+  unlockTasks(state);const demolition=state.tasks.find(item=>item.id==='demo-partitions');const partitions=state.tasks.find(item=>item.id==='partitions');assert.equal(demolition.status,'ready');assert.equal(partitions.status,'locked');
+  const blocked=forceAssignCrew(state,'general-crew',partitions.id);assert.equal(blocked.reason,'hard-blocker');assert.equal(blocked.blockers[0].id,'demo-partitions');
+  demolition.status='awaiting';unlockTasks(state);assert.equal(partitions.status,'ready');assert.ok(partitions.deps.includes('project'));
+});
+
+test('active work can be paused without losing progress or refunding its commitment',()=>{
+  const state=createInitialState();state.started=true;const task=state.tasks.find(item=>item.id==='survey');const crew=state.crews.find(item=>item.id==='foreman');Object.assign(task,{status:'active',progress:.37,crewId:crew.id,enabledToday:true,committed:true});crew.taskId=task.id;
+  const result=pauseTask(state,task.id);assert.equal(result.ok,true);assert.equal(task.status,'ready');assert.equal(task.progress,.37);assert.equal(task.enabledToday,false);assert.equal(task.committed,true);assert.equal(crew.taskId,null);
+  tickState(state,1);assert.equal(task.progress,.37);
 });
 
 test('final client retention is released only after documentation and inspection',()=>{

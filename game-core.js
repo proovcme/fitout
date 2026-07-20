@@ -1,4 +1,5 @@
 import { buildTasksForOrder } from './order-generator.js';
+import { WORK_BY_ID } from './work-catalog.js';
 import { generateAmbientBeat, generateSiteLine } from './procedural-content.js';
 import { SITUATIONS, situationById } from './situations.js';
 import { randomEventById } from './events/index.js';
@@ -205,9 +206,9 @@ export const TASK_BLUEPRINTS = [
   { id: 'project', title: 'Выпустить рабочий проект', short: 'Проект', skill: 'design', x: 2, y: 3, duration: 12, cost: 72, quality: 5, deps: ['survey'], priority: 3, color: '#a58ae1' },
   { id: 'move', title: 'Освободить open space', short: 'Переезд', skill: 'moving', x: 3, y: 4, duration: 10, cost: 86, quality: 2, deps: ['survey'], priority: 2, color: '#e9ad52' },
   { id: 'electric', title: 'Перенести розетки', short: 'Электрика', skill: 'electric', x: 6, y: 2, duration: 12, cost: 128, quality: 4, deps: ['survey'], priority: 2, color: '#69bfe8' },
-  { id: 'prep', title: 'Подготовить стены', short: 'Подготовка', skill: 'paint', x: 2, y: 1, duration: 13, cost: 92, quality: 4, deps: ['move'], priority: 2, color: '#d48f72' },
-  { id: 'paint', title: 'Покрасить переговорную', short: 'Покраска', skill: 'paint', x: 1, y: 1, duration: 18, cost: 176, quality: 7, deps: ['prep'], priority: 2, color: '#d87561' },
-  { id: 'desks', title: 'Собрать 24 рабочих места', short: 'Мебель', skill: 'furniture', x: 5, y: 4, duration: 22, cost: 238, quality: 6, deps: ['move', 'electric'], priority: 2, color: '#9d85d8' },
+  { id: 'prep', title: 'Подготовить стены', short: 'Подготовка', skill: 'paint', x: 2, y: 1, duration: 13, cost: 92, quality: 4, deps: ['move'], hardDeps:['move'], priority: 2, color: '#d48f72' },
+  { id: 'paint', title: 'Покрасить переговорную', short: 'Покраска', skill: 'paint', x: 1, y: 1, duration: 18, cost: 176, quality: 7, deps: ['prep'], hardDeps:['prep'], priority: 2, color: '#d87561' },
+  { id: 'desks', title: 'Собрать 24 рабочих места', short: 'Мебель', skill: 'furniture', x: 5, y: 4, duration: 22, cost: 238, quality: 6, deps: ['move', 'electric'], hardDeps:['move'], priority: 2, color: '#9d85d8' },
   { id: 'clean', title: 'Финишная уборка', short: 'Клининг', skill: 'cleaning', x: 7, y: 5, duration: 8, cost: 54, quality: 4, deps: ['paint', 'desks'], priority: 1, color: '#62cba0' },
   { id: 'executive-docs', title: 'Собрать исполнительную документацию', short: 'Исполнительная', skill: 'documentation', x: 6, y: 5, duration: 10, cost: 34, quality: 5, deps: ['electric','paint','desks'], priority: 2, color: '#69daa9' },
   { id: 'inspect', title: 'Приёмка и дефектовка', short: 'Приёмка', skill: 'management', x: 4, y: 2, duration: 5, cost: 12, quality: 5, deps: ['clean','executive-docs'], priority: 1, color: '#ddff55' },
@@ -508,6 +509,14 @@ export function selectOrder(state, order) {
   return true;
 }
 
+export function hardTaskBlockers(state,taskOrId) {
+  const task=typeof taskOrId==='string'?state.tasks.find(item=>item.id===taskOrId):taskOrId;
+  if(!task)return [];
+  const catalogHardDeps=WORK_BY_ID.get(task.id)?.hardAfter??[];
+  if(!Array.isArray(task.hardDeps))task.hardDeps=catalogHardDeps.filter(id=>state.tasks.some(item=>item.id===id));
+  return task.hardDeps.map(id=>state.tasks.find(item=>item.id===id)).filter(item=>item&&!['done','skipped','awaiting'].includes(item.status));
+}
+
 export function unlockTasks(state) {
   for (const task of state.tasks) {
     if (task.status === 'done' || task.status === 'skipped' || task.status === 'active' || task.status === 'awaiting') continue;
@@ -516,6 +525,7 @@ export function unlockTasks(state) {
       task.status='ready';
     }
     if(!state.started){task.status=task.id==='survey'?'ready':'locked';continue;}
+    if(hardTaskBlockers(state,task).length){task.status='locked';continue;}
     if(task.id==='inspect') {
       task.status=state.tasks.filter(item=>item.id!=='inspect').every(item=>['done','skipped'].includes(item.status))?'ready':'locked';
     } else task.status='ready';
@@ -697,12 +707,22 @@ export function dismissContractor(state,contractorId) {
 export function forceAssignCrew(state,crewId,taskId) {
   const crew=state.crews.find(item=>item.id===crewId);const task=state.tasks.find(item=>item.id===taskId);
   if(!crew||!task||!['ready','locked'].includes(task.status)||(crew.unavailableUntil??0)>state.elapsed)return {ok:false,reason:'unavailable'};
+  const blockers=hardTaskBlockers(state,task);if(blockers.length)return {ok:false,reason:'hard-blocker',blockers};
   if(task.crewId&&task.crewId!==crew.id)return {ok:false,reason:'occupied'};
   if(crew.taskId){const previous=state.tasks.find(item=>item.id===crew.taskId);if(previous&&previous.status==='active'){previous.status='ready';previous.crewId=null;}}
   if(!task.committed){if(state.budget+1e-6<task.cost)return {ok:false,reason:'budget'};state.budget=Math.max(0,state.budget-task.cost);recordCash(state,'expense','Работы',task.cost,`Ручной нагон: ${task.title}`);task.committed=true;}
-  task.status='active';task.enabledToday=true;task.crewId=crew.id;task.profileMismatch=crew.skill!==task.skill;task.manualAssignment=true;crew.taskId=task.id;crew.state='working';
+  task.status='active';task.enabledToday=true;task.crewId=crew.id;task.profileMismatch=crew.skill!==task.skill;task.manualAssignment=true;task.manualPaused=false;crew.taskId=task.id;crew.state='working';
   state.log.push({type:task.profileMismatch?'risk':'start',text:`${crew.name} переброшены на «${task.short}»${task.profileMismatch?' не по профилю':''}`});
   return {ok:true,crew,task,mismatch:task.profileMismatch};
+}
+
+export function pauseTask(state,taskId) {
+  const task=state.tasks.find(item=>item.id===taskId);if(!task||task.status!=='active')return {ok:false,reason:'task'};
+  const crew=state.crews.find(item=>item.id===task.crewId);
+  if(crew){crew.taskId=null;crew.state='idle';crew.visualBehavior='idle';}
+  task.status='ready';task.crewId=null;task.enabledToday=false;task.manualPaused=true;task.pausedAt=state.elapsed;
+  state.log.push({type:'risk',text:`Фронт остановлен: ${task.title}. Выполнено ${Math.round((task.progress??0)*100)}%.`});
+  unlockTasks(state);return {ok:true,task,crew};
 }
 
 export function sendPressureInstruction(state,taskId,channel='chat',rng=Math.random) {
@@ -772,7 +792,7 @@ function assignCrews(state) {
       recordCash(state,'expense','Работы',task.cost,`Материалы и работы: ${task.title}`);
       task.committed = true;
     }
-    task.status = 'active';task.profileMismatch=crew.skill!=='general'&&crew.skill!==task.skill;task.manualAssignment=false;
+    task.status = 'active';task.profileMismatch=crew.skill!=='general'&&crew.skill!==task.skill;task.manualAssignment=false;task.manualPaused=false;
     task.outOfSequence=task.deps.some(depId=>state.tasks.find(item=>item.id===depId)?.status!=='done');
     if(task.outOfSequence){state.quality=Math.max(0,state.quality-1.5);state.log.push({type:'risk',text:`Работы пошли не по порядку: ${task.title}`});}
     const projectReady=state.tasks.find(item=>item.id==='project')?.status==='done';
