@@ -128,6 +128,15 @@ test('tasks expose missing specialist crews and route directly to matching contr
   assert.doesNotMatch(problemSection,/item\.skill==='general'/);
 });
 
+test('a planned ready task always has an explicit start action and an honest crew state',()=>{
+  assert.match(script,/task\.status==='ready'\?`<button class="task-start-button"/);
+  assert.match(script,/taskCrewAvailability\(state,task\)/);
+  assert.match(script,/Подходящая бригада вернётся через/);
+  assert.match(script,/const result=startTaskNow\(state,task\.id\)/);
+  assert.match(styles,/\.task-start-button.*min-height:40px/);
+  assert.match(styles,/\.task-start-button:active.*scale:\.96/);
+});
+
 test('contractor market exposes explicit trade icons and every new career requires chapter one',()=>{
   assert.match(script,/function tradeBadge\(skill\)/);
   assert.match(script,/class="trade-badge"/);

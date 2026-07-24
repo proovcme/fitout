@@ -13,7 +13,7 @@ export const metaEvents = [
         effect: "Рабочие исчезают со стройки, зато начальство запоминает вашу управляемость.",
         note: "Две смены без основной бригады.",
         deltas: { budget: 0, quality: -3, trust: 5, time: 8 },
-        scene: { actor: "boss", actorCount: 1, hideSkill: "general", hideHours: 8 },
+        scene: { actor: "boss", actorCount: 1, hideSkill: "general", hideScope: "company", hideHours: 8 },
       },
       {
         id: "defend-brigade",

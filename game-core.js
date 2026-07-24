@@ -284,6 +284,10 @@ export function ensureRuntimeCrews(state){
   }
   state.crews??=[];
   for(const crew of state.crews){if(crew.skill==='moving')Object.assign(crew,{skill:'general',role:'Подсобные рабочие'});if(crew.skill==='demolition')Object.assign(crew,{skill:'construction',role:'Монтажники общестроя'});}
+  if(state.sceneEffect?.eventId==='boss-borrows-brigade'&&state.sceneEffect.hideScope!=='company'){
+    state.sceneEffect.hideScope='company';
+    for(const crew of state.crews.filter(item=>item.id.startsWith('crew-')&&item.skill===state.sceneEffect.hideSkill))crew.unavailableUntil=Math.min(crew.unavailableUntil??state.elapsed,state.elapsed);
+  }
   if(!state.crews.some(crew=>crew.id==='foreman'))state.crews.unshift({id:'foreman',name:'Вы',role:'Генеральный директор',skill:'management',color:'#ddff55',initials:'ГД',speed:.7,quality:.92,taskId:null,x:4,y:6,state:'idle'});
   const player=state.crews.find(crew=>crew.id==='foreman');Object.assign(player,{name:'Вы',role:'Генеральный директор',skill:'management',initials:'ГД',speed:.7,quality:.92});
   if(!state.crews.some(crew=>crew.id==='general-crew'))state.crews.push({id:'general-crew',name:'Хозбригада «Сами справимся»',role:'Универсальная штатная бригада',skill:'general',color:'#9aa89d',initials:'ХБ',speed:.52,quality:.78,manpower:4,taskId:null,x:7,y:7,state:'idle',level:1});
@@ -789,6 +793,28 @@ export function forceAssignCrew(state,crewId,taskId) {
   return {ok:true,crew,task,mismatch:task.profileMismatch};
 }
 
+export function taskCrewAvailability(state,taskOrId) {
+  const task=typeof taskOrId==='string'?state.tasks.find(item=>item.id===taskOrId):taskOrId;
+  if(!task)return {matching:[],present:[],free:[],away:[],nextArrival:null};
+  const matching=(state.crews??[]).filter(crew=>crew.skill===task.skill||crew.skill==='general');
+  const present=matching.filter(crew=>(crew.unavailableUntil??0)<=state.elapsed);
+  const free=present.filter(crew=>!crew.taskId);
+  const away=matching.filter(crew=>(crew.unavailableUntil??0)>state.elapsed);
+  const nextArrival=away.length?Math.min(...away.map(crew=>crew.unavailableUntil)):null;
+  return {matching,present,free,away,nextArrival};
+}
+
+export function startTaskNow(state,taskId) {
+  const task=state.tasks.find(item=>item.id===taskId);
+  if(!task||task.status!=='ready')return {ok:false,reason:'task',task};
+  const blockers=hardTaskBlockers(state,task);if(blockers.length)return {ok:false,reason:'hard-blocker',task,blockers};
+  task.enabledToday=true;task.manualPaused=false;task.priority=Math.max(2,task.priority);
+  const availability=taskCrewAvailability(state,task);
+  const crew=[...availability.free].sort((a,b)=>Number(b.skill===task.skill)-Number(a.skill===task.skill)||(b.speed??0)-(a.speed??0))[0];
+  if(!crew)return {ok:false,queued:true,reason:availability.away.length&&!availability.present.length?'away':availability.matching.length?'busy':'no-crew',task,...availability};
+  return {...forceAssignCrew(state,crew.id,task.id),availability};
+}
+
 export function pauseTask(state,taskId) {
   const task=state.tasks.find(item=>item.id===taskId);if(!task||task.status!=='active')return {ok:false,reason:'task'};
   const crew=state.crews.find(item=>item.id===task.crewId);
@@ -851,7 +877,11 @@ function availableTaskForCrew(state, crew) {
   if ((crew.unavailableUntil ?? 0) > state.elapsed) return undefined;
   return state.tasks
     .filter((task) => task.status === 'ready' && (task.skill === crew.skill||crew.skill==='general') && task.enabledToday)
-    .filter(task=>crew.skill!=='general'||!state.crews.some(other=>other.id!==crew.id&&other.skill===task.skill&&!other.taskId&&(other.unavailableUntil??0)<=state.elapsed))
+    .filter(task=>{
+      if(crew.skill!=='general')return true;
+      const freeExact=state.crews.filter(other=>other.skill===task.skill&&!other.taskId&&(other.unavailableUntil??0)<=state.elapsed).sort((a,b)=>(b.speed??0)-(a.speed??0)||a.id.localeCompare(b.id));
+      return !freeExact.length||freeExact[0].id===crew.id;
+    })
     .filter((task) => !task.crewId)
     .sort((a, b) => b.priority-a.priority||a.duration-b.duration)[0];
 }
@@ -1188,7 +1218,8 @@ export function applyCatalogEventChoice(state, event, choiceId) {
   const duration=Math.max(5,scene.hideHours??8);
   state.sceneEffect={...scene,eventId:event.id,expiresAt:state.elapsed+duration};
   if(scene.hideSkill) {
-    for(const crew of state.crews.filter(item=>item.skill===scene.hideSkill)) {
+    const hiddenCrews=state.crews.filter(item=>item.skill===scene.hideSkill&&(scene.hideScope!=='company'||!item.id.startsWith('crew-'))&&(scene.hideScope!=='contractor'||item.id.startsWith('crew-')));
+    for(const crew of hiddenCrews) {
       crew.unavailableUntil=state.elapsed+(scene.hideHours??8);
       if(crew.taskId) {
         const task=state.tasks.find(item=>item.id===crew.taskId);

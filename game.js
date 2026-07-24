@@ -33,6 +33,8 @@ import {
   scheduledTasksForDay,
   selectOrder,
   settleContractor,
+  startTaskNow,
+  taskCrewAvailability,
   serializeState,
   shiftMasterScheduleTask,
   sendPressureInstruction,
@@ -755,6 +757,13 @@ function taskProblem(task) {
   }
   if(task.manualPaused)return `Приостановлено на ${Math.round((task.progress??0)*100)}% · бригада освобождена`;
   if(task.status==='ready'&&state.started&&!task.enabledToday)return 'Не включено в план текущего дня';
+  if(task.status==='ready'&&task.enabledToday){
+    const availability=taskCrewAvailability(state,task);
+    if(availability.free.length)return `Свободна бригада «${availability.free[0].name}» — можно запустить сейчас`;
+    if(availability.present.length)return `Подходящие бригады заняты: ${availability.present.map(crew=>crew.name).join(', ')}`;
+    if(availability.nextArrival!==null)return `Подходящая бригада вернётся через ${Math.max(1,Math.ceil(availability.nextArrival-state.elapsed))} ч`;
+    return 'Работа в плане, но подходящей бригады на объекте нет';
+  }
   return '';
 }
 
@@ -783,7 +792,7 @@ function renderTasks() {
         <span class="task-progress-row"><i><em style="width:${percent}%"></em></i><b>${percent}%</b><small>${SKILL_LABELS[task.skill]} · ${task.duration} ч</small></span>
         ${issue?`<span class="task-problem">! ${issue}</span>`:''}
         ${coverage?`<span class="task-resource-gap"><span><b>${coverage.kind==='missing'?'НЕТ ПРОФИЛЬНОГО ИСПОЛНИТЕЛЯ':`ВЫХОД ЧЕРЕЗ ${coverage.hours} Ч`}</b><small>${coverage.kind==='missing'?'Хозбригада сможет подменить, но медленнее и с риском качества.':'Подрядчик нанят, но ещё не прибыл на объект.'}</small></span>${coverage.kind==='missing'&&coverage.hireable?`<button type="button" data-find-contractor="${task.skill}">Найти →</button>`:''}</span>`:''}
-        ${task.status==='ready'&&!task.enabledToday?`<button class="task-start-button" data-start-task="${task.id}">${task.manualPaused?'Возобновить работы':'Включить сегодня · начать'}</button>`:''}
+        ${task.status==='ready'?`<button class="task-start-button" data-start-task="${task.id}">${task.enabledToday?'Начать сейчас':task.manualPaused?'Возобновить работы':'Включить сегодня · начать'}</button>`:''}
         ${task.status==='active'?`<button class="task-stop-button" data-stop-task="${task.id}">Остановить работы</button>`:''}
         ${task.optional&&['ready','locked','blocked'].includes(task.status)?`<button class="task-skip-button" data-skip-task="${task.id}">Сэкономить · пропустить с риском</button>`:''}
         ${task.status==='awaiting'?`<button class="acceptance-button" data-submit-task="${task.id}">Предъявить работу · попытка ${(task.acceptanceAttempts??0)+1}</button>`:''}
@@ -838,10 +847,12 @@ function renderSelection() {
     return;
   }
   const crew = state.crews.find((item) => item.id === task.crewId);
+  const availability=taskCrewAvailability(state,task);
+  const resourceText=availability.free.length?`Свободна бригада «${availability.free[0].name}». Нажмите «Начать сейчас» в карточке работы.`:availability.present.length?`Подходящие бригады сейчас заняты: ${availability.present.map(item=>item.name).join(', ')}.`:availability.nextArrival!==null?`Подходящая бригада временно отсутствует и вернётся через ${Math.max(1,Math.ceil(availability.nextArrival-state.elapsed))} ч.`:'Подходящей бригады на объекте нет.';
   refs.selection.hidden = false;
   refs.selection.style.setProperty('--task-color', task.color);
   refs.selection.innerHTML = `<div class="selection-top"><div><span class="eyebrow">${SKILL_LABELS[task.skill].toUpperCase()}</span><h3>${task.title}</h3></div><button class="selection-close" data-close-selection type="button" aria-label="Закрыть">×</button></div>
-    <p>${crew ? `${crew.name} уже на месте. Осталось примерно ${Math.max(1, Math.ceil(task.duration * (1 - task.progress) / crew.speed))} ч.` : task.status === 'locked' ? 'Сначала завершите зависимые работы. Бетон не читает диаграмму Ганта, но всё равно требует последовательности.' : task.status === 'done' ? 'Работа закрыта. Фото приложены, замечания предусмотрительно не найдены.' : task.status==='skipped'?'Вы осознанно не стали это делать. Экономия уже случилась, последствия ещё выбирают время.':'Свободная подходящая бригада возьмёт эту работу автоматически.'}</p>
+    <p>${crew ? `${crew.name} уже на месте. Осталось примерно ${Math.max(1, Math.ceil(task.duration * (1 - task.progress) / crew.speed))} ч.` : task.status === 'locked' ? 'Сначала завершите зависимые работы. Бетон не читает диаграмму Ганта, но всё равно требует последовательности.' : task.status === 'done' ? 'Работа закрыта. Фото приложены, замечания предусмотрительно не найдены.' : task.status==='skipped'?'Вы осознанно не стали это делать. Экономия уже случилась, последствия ещё выбирают время.':resourceText}</p>
     <div class="selection-progress"><i style="width:${Math.round(task.progress * 100)}%"></i></div><button class="player-zone-button" data-player-zone="${task.id}" type="button">${state.playerZoneTaskId===task.id?'ВЫ УЖЕ ЗДЕСЬ · ТЕМП +18%':'ПРИЙТИ В ЭТУ ЗОНУ'}</button>`;
 }
 
@@ -2465,8 +2476,9 @@ document.addEventListener('click',(event)=>{
   if(startTaskButton){
     event.stopPropagation();const task=state.tasks.find(item=>item.id===startTaskButton.dataset.startTask);
     if(task?.status==='ready'){
-      task.enabledToday=true;task.manualPaused=false;task.priority=Math.max(2,task.priority);const available=state.crews.find(crew=>(crew.unavailableUntil??0)<=state.elapsed&&!crew.taskId&&(crew.skill===task.skill||crew.skill==='general'));
-      renderAll();persistGame();feedback('message');showToast(available?`«${task.short}» включена в план. Свободная бригада выходит на фронт.`:`«${task.short}» включена в план и ждёт подходящую свободную бригаду.`,available?'done':'risk');
+      const result=startTaskNow(state,task.id);renderAll();persistGame();feedback(result.ok?'build':'message');
+      const waitHours=result.nextArrival===null?null:Math.max(1,Math.ceil(result.nextArrival-state.elapsed));
+      showToast(result.ok?`«${task.short}» запущена. ${result.crew.name} выходит на фронт.`:result.reason==='away'?`«${task.short}» остаётся в плане. Бригаду вернут через ${waitHours} ч.`:result.reason==='busy'?`«${task.short}» в очереди: подходящие бригады уже заняты.`:result.reason==='no-crew'?`«${task.short}» включена, но исполнителя нет — откройте «Команду».`:`«${task.short}» сейчас запустить нельзя.`,result.ok?'done':'risk');
     }
   }
   const stopTaskButton=event.target.closest('[data-stop-task]');

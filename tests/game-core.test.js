@@ -23,6 +23,8 @@ import {
   pauseTask,
   selectOrder,
   settleContractor,
+  startTaskNow,
+  taskCrewAvailability,
   requestClientFunding,
   resolveScheduleRevision,
   sendPressureInstruction,
@@ -129,6 +131,36 @@ test('priority cycles for queued and active work', () => {
   state.tasks.find((task) => task.id === 'move').status = 'active';
   assert.equal(cyclePriority(state, 'move'), true);
   assert.equal(state.tasks.find((task) => task.id === 'move').priority,1);
+});
+
+test('two idle helper crews do not deadlock while yielding a general task to each other',()=>{
+  const state=createInitialState();assert.equal(hireContractor(state,'movers').ok,true);
+  const task=state.tasks.find(item=>item.id==='move');task.deps=[];task.status='ready';task.enabledToday=true;state.tasks=[task];
+  state.started=true;state.paused=false;state.nextMajorEventAt=999;state.eventSchedule=[];
+  const availability=taskCrewAvailability(state,task);assert.ok(availability.free.length>=2);
+  tickState(state,.02);assert.equal(task.status,'active');assert.ok(task.crewId);
+});
+
+test('start now assigns a present crew and explains when every matching crew is away',()=>{
+  const state=createInitialState();const task=state.tasks.find(item=>item.id==='move');task.deps=[];task.status='ready';task.enabledToday=true;state.tasks=[task];state.started=true;
+  const started=startTaskNow(state,task.id);assert.equal(started.ok,true);assert.equal(task.status,'active');
+  task.status='ready';task.crewId=null;started.crew.taskId=null;
+  for(const crew of state.crews.filter(item=>item.skill==='general'))crew.unavailableUntil=state.elapsed+6;
+  const waiting=startTaskNow(state,task.id);assert.equal(waiting.ok,false);assert.equal(waiting.reason,'away');assert.equal(waiting.nextArrival,state.elapsed+6);
+});
+
+test('boss may borrow company helpers but cannot confiscate an independent contractor',()=>{
+  const state=createInitialState();assert.equal(hireContractor(state,'movers').ok,true);
+  const event=allRandomEvents.find(item=>item.id==='boss-borrows-brigade');assert.ok(event);
+  applyCatalogEventChoice(state,event,'release-brigade');
+  assert.ok(state.crews.find(item=>item.id==='general-crew').unavailableUntil>state.elapsed);
+  assert.equal(state.crews.find(item=>item.id==='crew-movers').unavailableUntil,state.elapsed);
+});
+
+test('an old boss-event save returns an incorrectly confiscated contractor on load',()=>{
+  const state=createInitialState();assert.equal(hireContractor(state,'movers').ok,true);const contractor=state.crews.find(item=>item.id==='crew-movers');
+  contractor.unavailableUntil=state.elapsed+6;state.sceneEffect={eventId:'boss-borrows-brigade',hideSkill:'general',hideHours:8,expiresAt:state.elapsed+6};
+  ensureRuntimeCrews(state);assert.equal(contractor.unavailableUntil,state.elapsed);assert.equal(state.sceneEffect.hideScope,'company');
 });
 
 test('client choice changes the three project constraints', () => {
