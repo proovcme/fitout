@@ -82,6 +82,17 @@ test('new game uses the headquarters market without the obsolete map flow',()=>{
   assert.match(script,/Заказать материалы/);
 });
 
+test('new game is a destructive two-step career reset instead of a market shortcut',()=>{
+  assert.match(html,/class="[^"]*danger-button[^"]*" id="newGameButton"/);
+  assert.match(script,/function armNewGameButton\(\)/);
+  assert.match(script,/function startNewCareer\(\)/);
+  assert.match(script,/button\.dataset\.confirmNewGame==='true'/);
+  assert.match(script,/Все объекты, деньги, штаб и команда будут потеряны/);
+  const handler=script.slice(script.indexOf("$('#newGameButton').addEventListener"),script.indexOf('function frame'));
+  assert.doesNotMatch(handler,/companyTab='market';renderMainMenu\(\);showToast\('Текущие объекты сохранены/);
+  assert.match(styles,/\.menu-button\.danger-button\.is-armed/);
+});
+
 test('staff controls use player-facing language instead of internal abbreviations',()=>{
   assert.match(script,/Навыки · \$\{developmentPointsLabel\(employee\.developmentPoints\)\}/);
   assert.match(script,/Перебросить сегодня/);
