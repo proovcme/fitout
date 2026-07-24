@@ -117,11 +117,12 @@ export function buildTasksForOrder(order) {
 const CAMPAIGN_SPECS = [
   {
     id:'campaign-tutorial', tutorial:true, requiresProjects:0, chapter:1,
-    title:'Переговорная к понедельнику', clientName:'ООО «Первые вводные»', clientPerson:'Анна Крылова', clientRole:'генеральный директор', clientType:'commercial',
-    projectType:'refresh', projectTypeLabel:'Учебный ремонт без выселения', area:180, finishClass:'B', finishClassId:'b', finishQuality:76,
+    title:'Первый объект: переговорная к понедельнику', clientName:'ООО «Первые вводные»', clientPerson:'Анна Крылова', clientRole:'генеральный директор', clientType:'commercial',
+    story:'Вы устали быть просто строителем и решили стать КОРОЛЁМ ГЕНПОДРЯДА. Для начала сняли цоколь в БЦ «Банкрот», обменяли PS5 на принтер и собрали команду людей, которым тоже было нечего терять, кроме выходных.',
+    projectType:'refresh', projectTypeLabel:'Первая глава · ремонт без выселения', area:180, finishClass:'B', finishClassId:'b', finishQuality:76,
     workScopes:['electrical','lowcurrent','finishes','furniture'],
     complexity:1, budget:760, deadlineHours:72, qualityTarget:74, location:'Москва, Басманный', mapX:28, mapY:36, color:'#ddff55',
-    riskTags:['первая миссия: события отключены, пока вы осваиваете управление','заказчик уже выбрал цвет, но это не считается гарантией'], procurement:'прямой договор и одна честная смета', visualSeed:5005,
+    riskTags:['в цоколе штаба нет окон, зато есть юридический адрес','заказчик уже выбрал цвет, но это не считается гарантией','крупные события отключены до конца первой главы'], procurement:'прямой договор и одна честная смета', visualSeed:5005,
   },
   {
     id:'campaign-floor', requiresProjects:1, chapter:2,

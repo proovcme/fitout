@@ -89,9 +89,11 @@ test('staff controls use player-facing language instead of internal abbreviation
   assert.match(script,/Критичные вопросы: \$\{urgent\}/);
 });
 
-test('new player tutorial teaches flow through a constraint narrative',()=>{
+test('new player tutorial opens the first story chapter and teaches flow through play',()=>{
   assert.match(script,/Семён/);
-  assert.match(script,/Сначала идентифицируйте ограничение потока/);
-  assert.match(script,/Лишние ресурсы перед ограничением создают очередь/);
-  assert.match(script,/Улучшение — цикл: найти, использовать, подчинить, усилить и искать заново/);
+  assert.match(script,/КОРОЛЁМ ГЕНПОДРЯДА/);
+  assert.match(script,/БЦ «Банкрот»/);
+  assert.match(script,/PS5 была единственным ликвидным активом/);
+  assert.match(script,/Сначала устраните то, что держит весь поток/);
+  assert.match(script,/Завершили, приняли, получили деньги/);
 });
