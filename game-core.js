@@ -512,7 +512,8 @@ export function hardTaskBlockers(state,taskOrId) {
   const task=typeof taskOrId==='string'?state.tasks.find(item=>item.id===taskOrId):taskOrId;
   if(!task)return [];
   const catalogHardDeps=WORK_BY_ID.get(task.id)?.hardAfter??[];
-  if(!Array.isArray(task.hardDeps))task.hardDeps=catalogHardDeps.filter(id=>state.tasks.some(item=>item.id===id));
+  const presentCatalogDeps=catalogHardDeps.filter(id=>state.tasks.some(item=>item.id===id));
+  task.hardDeps=[...new Set([...(Array.isArray(task.hardDeps)?task.hardDeps:[]),...presentCatalogDeps])];
   return task.hardDeps.map(id=>state.tasks.find(item=>item.id===id)).filter(item=>item&&!['done','skipped','awaiting'].includes(item.status));
 }
 
@@ -1116,9 +1117,9 @@ export function tickState(state, deltaHours) {
   state.elapsed += deltaHours;
   syncOrganizationCalendar(state);
   const currentDay=Math.floor(state.elapsed/24);
-  if(state.elapsed>=currentDay*24+9&&(state.reportedDay??-1)<currentDay){state.needsReport=true;state.paused=true;return state;}
+  if(state.elapsed>=currentDay*24+9&&(state.reportedDay??-1)<currentDay){state.needsReport=true;state.paused=true;state.speed=1;return state;}
   const dayIndex=Math.floor(state.elapsed/24);
-  if(dayIndex>state.plannedDay){state.needsPlanning=true;state.paused=true;for(const task of state.tasks)task.enabledToday=false;return state;}
+  if(dayIndex>state.plannedDay){state.needsPlanning=true;state.paused=true;state.speed=1;for(const task of state.tasks)task.enabledToday=false;return state;}
   state.smokeBreak=Math.floor(state.elapsed/8)%4===2;
   updateAmbientActivity(state);
   updateSituations(state);

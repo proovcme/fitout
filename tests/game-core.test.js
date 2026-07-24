@@ -357,9 +357,15 @@ test('the company general crew can cover every trade slowly and specialists can 
 test('demolition is a hard physical blocker while design remains an accepted sequence risk',()=>{
   const state=createInitialState(makeSeededRng(27),allRandomEvents);const renovation=generateOrders(makeSeededRng(27),2)[1];assert.equal(selectOrder(state,renovation),true);state.started=true;
   for(const id of ['move','protection','temporary-networks']){const task=state.tasks.find(item=>item.id===id);if(task)task.status='done';}
-  unlockTasks(state);const demolition=state.tasks.find(item=>item.id==='demo-partitions');const partitions=state.tasks.find(item=>item.id==='partitions');assert.equal(demolition.status,'ready');assert.equal(partitions.status,'locked');
+  const partitions=state.tasks.find(item=>item.id==='partitions');partitions.hardDeps=[];unlockTasks(state);const demolition=state.tasks.find(item=>item.id==='demo-partitions');assert.equal(demolition.status,'ready');assert.equal(partitions.status,'locked');
   const blocked=forceAssignCrew(state,'general-crew',partitions.id);assert.equal(blocked.reason,'hard-blocker');assert.equal(blocked.blockers[0].id,'demo-partitions');
   demolition.status='awaiting';unlockTasks(state);assert.equal(partitions.status,'ready');assert.ok(partitions.deps.includes('project'));
+});
+
+test('reaching the evening report resets accelerated time to normal speed',()=>{
+  const state=createInitialState();state.started=true;state.paused=false;state.speed=4;state.elapsed=8.9;state.reportedDay=-1;
+  tickState(state,.2);
+  assert.equal(state.needsReport,true);assert.equal(state.paused,true);assert.equal(state.speed,1);
 });
 
 test('active work can be paused without losing progress or refunding its commitment',()=>{

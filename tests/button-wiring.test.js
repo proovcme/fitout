@@ -111,6 +111,13 @@ test('tasks expose missing specialist crews and route directly to matching contr
   assert.doesNotMatch(problemSection,/item\.skill==='general'/);
 });
 
+test('a new day resets speed and hard-blocked work cannot be selected in planning',()=>{
+  assert.match(script,/state\.speed=1;for\(const task of state\.tasks\)task\.enabledToday=false/);
+  assert.match(script,/Новый день начинается на скорости 1×/);
+  assert.match(script,/disabled aria-disabled="true"/);
+  assert.match(script,/Заблокированный монтаж планом не разблокируется/);
+});
+
 test('laptop negotiation is readable and never reopens halfway down the brief',()=>{
   assert.match(styles,/@media \(min-width:1180px\) and \(min-height:700px\)/);
   assert.match(styles,/\.mission-copy > p \{ font-size:14px/);
