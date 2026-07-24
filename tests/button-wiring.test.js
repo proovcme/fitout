@@ -47,6 +47,10 @@ test('headquarters employees stay seated at role workstations',()=>{
   const hqSection=script.slice(script.indexOf('function hqChair'),script.indexOf('function makeDesk'));
   assert.match(hqSection,/function hqChair/);
   assert.match(hqSection,/hqRoleProp\(employee\.roleId/);
+  assert.match(hqSection,/leftThigh/);
+  assert.match(hqSection,/rightShin/);
+  assert.match(hqSection,/person:\[-\.75,1\.06,0\]/);
+  assert.doesNotMatch(hqSection,/person:\[-\.75,1\.06,Math\.PI\]/);
   assert.match(hqSection,/activity==='reviewing'/);
   assert.doesNotMatch(hqSection,/setPersonMotion\(person,'walk'\)/);
   assert.doesNotMatch(hqSection,/requestRiggedCharacter/);
