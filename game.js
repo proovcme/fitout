@@ -387,7 +387,7 @@ function resumePlayerGame() {
   if(state.started){state.paused=true;if(state.needsPlanning){renderDayPlan();refs.planning.classList.add('visible');}}
   else if(state.phase==='preparation'){renderPreparation();refs.market.classList.add('visible');}
   else if(state.phase==='schedule'){openMasterSchedule();}
-  else if(state.selectedOrder)refs.brief.classList.add('visible');else refs.orders.classList.add('visible');
+  else if(state.selectedOrder)openBriefModal();else refs.orders.classList.add('visible');
   renderAll();
 }
 
@@ -459,6 +459,12 @@ function feedback(kind='done') {
   playSound(kind==='risk'?'risk':kind==='cash'?'cash':kind==='message'?'message':kind==='build'?'build':'done');
   const flash=$('#feedbackFlash');flash.className=`feedback-flash ${kind==='risk'?'risk':''} visible`;window.setTimeout(()=>flash.classList.remove('visible'),150);
   cameraKick=Math.max(cameraKick,kind==='risk'?.32:kind==='build'?.16:.08);
+}
+
+function openBriefModal() {
+  refs.brief.classList.add('visible');
+  const surface=refs.brief.querySelector('.mission-modal');
+  if(surface)surface.scrollTop=0;
 }
 
 function renderOrders() {
@@ -2385,7 +2391,7 @@ $('#acceptOrder').addEventListener('click',()=>{
   visualProfile=createVisualProfile(order.visualSeed,order);
   rebuildTaskMarkers();
   if(sceneProps.client)sceneProps.client.userData.displayName=order.clientPerson;
-  refs.orders.classList.remove('visible');refs.brief.classList.add('visible');renderAll();feedback('cash');showToast(`Заказ выбран: ${order.location}. Мобилизация организации ${money(state.organizationMobilization)}.`);
+  refs.orders.classList.remove('visible');openBriefModal();renderAll();feedback('cash');showToast(`Заказ выбран: ${order.location}. Мобилизация организации ${money(state.organizationMobilization)}.`);
 });
 $('#regenerateOrders').addEventListener('click',()=>{orders=createOrderMarket();state.orderOptions=orders;selectedOrderId=orders.find(order=>(order.requiresProjects??0)<=ensureOrganization(state).projectsCompleted)?.id??orders[0].id;renderOrders();showToast('Рынок обновлён. Сюжетные заказы остались: рекомендации помнят ваши объекты.');});
 $('#startMission').addEventListener('click',()=>{if(state.contract.cardsPlayed.length!==2)return;state.phase='preparation';refs.brief.classList.remove('visible');refs.market.classList.add('visible');renderPreparation();renderAll();showToast('Контракт подписан. Мелкий шрифт ликует.');});
@@ -2413,7 +2419,7 @@ $('#closeSchedule').addEventListener('click',closeMasterSchedule);
 $('#closeSituation').addEventListener('click',()=>{refs.situation.classList.remove('visible');openSituationId=null;state.paused=situationWasPaused;showToast('Вопрос оставлен висеть над человеком. Буквально.');});
 window.addEventListener('keydown',(event)=>{if(event.key!=='Escape')return;const close=[...document.querySelectorAll('.modal-backdrop.visible .modal-close')].at(-1);if(close){event.preventDefault();close.click();return;}if(selectedPerson||state.selectedTaskId){selectedPerson=null;state.selectedTaskId=null;renderSelection();}});
 $('#sendReport').addEventListener('click',()=>{const day=Math.floor(state.elapsed/24);const revision=resolveScheduleRevision(state,selectedScheduleRoute??'restore',eveningScheduleSnapshot);const dailyCost=closeDayFinances(state);state.reportedDay=day;state.elapsed=(day+1)*24;state.needsReport=false;state.needsPlanning=true;state.paused=true;for(const task of state.tasks)task.enabledToday=false;const companyDay=advanceCompanyDay(state);refs.report.classList.remove('visible');eveningScheduleSnapshot=null;eveningScheduleDay=-1;selectedScheduleRoute=null;renderDayPlan();refs.planning.classList.add('visible');const revisionText=revision.changed?(revision.mode==='client'?(revision.approved?' Заказчик согласовал новую версию графика.':' Заказчик отклонил правки — вернули базу.'):(revision.mode==='secret'?(revision.detected?' Тайную правку заметили.':' Тихая версия графика вступила в силу.'):' Правки отменены.')):'';const portfolioText=companyDay.background.length?` Фоновых объектов посчитано: ${companyDay.background.length}.`:'';const crisisText=companyDay.crisis?` КРИЗИС: ${companyDay.crisis.reason}, на спасение ${companyDay.crisis.deadlineDay-companyDay.day} дней.`:'';showToast(`Отчёт ушёл. За день объекта списано ${money(dailyCost)}.${revisionText}${portfolioText}${crisisText}`,companyDay.crisis?'risk':'done');persistGame();});
-$('#briefButton').addEventListener('click',()=>state.selectedOrder?refs.brief.classList.add('visible'):refs.orders.classList.add('visible'));
+$('#briefButton').addEventListener('click',()=>state.selectedOrder?openBriefModal():refs.orders.classList.add('visible'));
 $('#pauseButton').addEventListener('click',()=>{if(!state.started)return;state.paused=!state.paused;renderHud();});
 $('#endDayButton').addEventListener('click',()=>{if(!state.started||state.completed){showToast('Сначала выйдите на объект. Заканчивать рынок заказов рано.','risk');return;}state.paused=true;state.needsReport=true;openReport();renderHud();persistGame();showToast('Смена остановлена. Вечерний Excel уже требует внимания.','risk');});
 $('#soundToggle').addEventListener('click',()=>{audioEnabled=!audioEnabled;$('#soundToggle').textContent=audioEnabled?'♪':'×';$('#soundToggle').title=audioEnabled?'Звук включён':'Звук выключен';if(audioEnabled)playSound('click');});

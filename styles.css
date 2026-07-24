@@ -1123,6 +1123,91 @@ blockquote cite { display: block; margin-top: 6px; color: var(--muted); font-siz
   .main-menu-art { min-height:170px; }
 }
 
+/* Readable laptop negotiation: the brief is a decision screen, not microfilm. */
+@media (min-width:1180px) and (min-height:700px) {
+  .mission-modal {
+    grid-template-columns:minmax(390px,.55fr) minmax(0,1fr);
+    width:min(1180px,calc(100vw - 48px));
+    max-height:calc(100dvh - 48px);
+    overflow:hidden;
+  }
+  .mission-visual { min-height:760px; }
+  .mission-copy {
+    max-height:calc(100dvh - 48px);
+    padding:32px 38px 28px;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+  }
+  .mission-copy h1 {
+    margin:9px 0 12px;
+    max-width:640px;
+    font-size:clamp(38px,3vw,48px);
+    line-height:1.02;
+  }
+  .mission-copy > p { font-size:14px; line-height:1.55; }
+  .mission-copy > .market-thesis {
+    margin-top:9px;
+    padding-left:13px;
+    font-size:12px;
+    line-height:1.5;
+  }
+  .client-quote { gap:15px; margin-top:17px; padding:15px; border-radius:17px; }
+  blockquote { font-size:12px; line-height:1.5; }
+  blockquote cite { margin-top:5px; font-size:10px; }
+  .contract-grid { margin-top:15px; }
+  .contract-grid div { gap:6px; padding:12px; }
+  .contract-grid small { font-size:9px; }
+  .contract-grid strong { font-size:13px; }
+  .brief-goals { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:15px 0; }
+  .brief-goals li {
+    align-items:flex-start;
+    gap:8px;
+    font-size:10px;
+    line-height:1.35;
+  }
+  .brief-goals i { flex:0 0 27px; width:27px; height:27px; border-radius:8px; }
+  .negotiation-panel { margin-top:14px; padding-top:13px; }
+  .negotiation-panel .subheading { font-size:9px; }
+  .contract-deck { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:13px; }
+  .contract-card {
+    min-height:82px;
+    padding:13px;
+    border-radius:12px;
+    transition-property:box-shadow,background-color,scale;
+    transition-duration:150ms;
+  }
+  .contract-card strong { font-size:11px; line-height:1.25; }
+  .contract-card small { margin-top:7px; font-size:9px; line-height:1.4; }
+  .contract-card:active { scale:.96; }
+  .mission-copy .hero-button { min-height:54px; font-size:12px; }
+  .source-credit { margin-top:10px; font-size:9px; }
+
+  .tutorial-coach {
+    left:max(24px,calc(50vw - min(590px,calc(50vw - 24px)) + 24px));
+    bottom:48px;
+    width:min(390px,calc(34vw - 44px));
+    padding:18px;
+    border-radius:17px;
+  }
+  .tutorial-coach header span,
+  .tutorial-coach header button { font-size:9px; }
+  .tutorial-coach h2 { margin:11px 0 7px; font-size:19px; line-height:1.15; }
+  .tutorial-coach p { font-size:11px; line-height:1.55; }
+  .tutorial-mentor {
+    grid-template-columns:42px minmax(0,1fr);
+    gap:11px;
+    margin-top:11px;
+    padding:11px;
+    border-radius:12px;
+  }
+  .tutorial-mentor > i { width:42px; height:42px; border-radius:10px; font-size:10px; }
+  .tutorial-mentor small { font-size:7px; }
+  .tutorial-mentor b { margin-top:4px; font-size:9px; line-height:1.45; }
+  .tutorial-coach footer { gap:4px; margin-top:12px; padding-top:11px; }
+  .tutorial-coach footer small { font-size:7px; }
+  .tutorial-coach footer strong { font-size:9px; line-height:1.45; }
+}
+
 /* Compact landscape phones: keep every decisive button inside a scrollable surface. */
 @media (max-height:620px) and (min-width:641px) {
   body { padding-bottom:48px; overflow-y:auto; overflow-x:hidden; }

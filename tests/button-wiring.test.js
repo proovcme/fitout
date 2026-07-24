@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const script=readFileSync(new URL('../game.js',import.meta.url),'utf8');
+const styles=readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 
 test('every static button is wired directly or through its form',()=>{
   const ids=[...html.matchAll(/<button[^>]*\sid="([^"]+)"/g)].map(match=>match[1]);
@@ -96,4 +97,14 @@ test('new player tutorial opens the first story chapter and teaches flow through
   assert.match(script,/PS5 была единственным ликвидным активом/);
   assert.match(script,/Сначала устраните то, что держит весь поток/);
   assert.match(script,/Завершили, приняли, получили деньги/);
+});
+
+test('laptop negotiation is readable and never reopens halfway down the brief',()=>{
+  assert.match(styles,/@media \(min-width:1180px\) and \(min-height:700px\)/);
+  assert.match(styles,/\.mission-copy > p \{ font-size:14px/);
+  assert.match(styles,/\.contract-deck \{ grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles,/\.contract-card strong \{ font-size:11px/);
+  assert.match(styles,/\.tutorial-coach h2 \{ margin:11px 0 7px; font-size:19px/);
+  assert.match(script,/function openBriefModal\(\)/);
+  assert.match(script,/surface\.scrollTop=0/);
 });
