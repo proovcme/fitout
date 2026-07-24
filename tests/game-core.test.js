@@ -15,6 +15,7 @@ import {
   dismissContractor,
   ensureProjectFinance,
   ensureRuntimeCrews,
+  ensureWorkforceMarket,
   forceAssignCrew,
   hireContractor,
   hireTeamMember,
@@ -36,7 +37,7 @@ import {
   updateSiteCleanliness,
 } from '../game-core.js';
 import { allRandomEvents } from '../events/index.js';
-import { createCampaignOrders, generateOrders, makeSeededRng } from '../order-generator.js';
+import { buildTasksForOrder, createCampaignOrders, generateOrders, makeSeededRng } from '../order-generator.js';
 
 test('only dependency-free work unlocks initially', () => {
   const state = createInitialState();
@@ -117,7 +118,7 @@ test('the tutorial contract is honestly winnable with positive profit and no inj
   const state = createInitialState(() => .99,allRandomEvents);
   assert.equal(selectOrder(state,createCampaignOrders()[0]),true);
   state.tutorial=null;
-  for (const contractorId of ['designers','painters','electricians','cleaners']) assert.equal(hireContractor(state, contractorId).ok, true);
+  for (const contractorId of ['movers','designers','engineers','painters','electricians','assemblers','cleaners']) assert.equal(hireContractor(state, contractorId).ok, true);
   state.phase='execution';state.started = true;state.paused = false;state.eventSchedule=[];state.nextMajorEventAt=1e9;state.nextSituationAt=1e9;
   for (const task of state.tasks) task.enabledToday = true;
   let closedDay=-1;
@@ -169,9 +170,25 @@ test('catalog choice can remove a crew and create a temporary 3D scene effect', 
   hireContractor(state, 'movers');
   const incident = allRandomEvents.find((event) => event.id === 'migracionnaya-proverka');
   assert.equal(applyCatalogEventChoice(state, incident, 'legalnaya-pauza'), true);
-  assert.ok(state.crews.find((crew) => crew.skill === 'moving').unavailableUntil > state.elapsed);
+  assert.ok(state.crews.some((crew) => crew.skill === 'general' && crew.unavailableUntil > state.elapsed));
   assert.equal(state.sceneEffect.actor, 'inspector');
   assert.equal(state.sceneEffect.actorCount, 2);
+});
+
+test('legacy movers become helpers and demolition follows the matching installation trade',()=>{
+  const state=createInitialState();
+  state.contractors.find(item=>item.id==='movers').skill='moving';
+  state.crews.push({id:'legacy-demo',name:'Старый демонтаж',skill:'demolition',taskId:null});
+  state.contractorNetwork=[{id:'old-movers',specialty:'moving'},{id:'old-demo',specialty:'demolition'}];
+  state.tasks=buildTasksForOrder({area:620,budget:2400,deadlineHours:160,complexity:3,projectType:'renovation',workScopes:['electrical','hvac','finishes','furniture']});
+  ensureWorkforceMarket(state);ensureRuntimeCrews(state);
+  assert.equal(state.contractors.find(item=>item.id==='movers').skill,'general');
+  assert.equal(state.contractors.find(item=>item.id==='movers').name,'Подсобные работы');
+  assert.equal(state.crews.find(item=>item.id==='legacy-demo').skill,'construction');
+  assert.deepEqual(state.contractorNetwork.map(item=>item.specialty),['general','construction']);
+  const expected={move:'general','demo-partitions':'construction','demo-equipment':'engineering','demo-floor':'paint','demo-ceiling':'paint'};
+  for(const [id,skill] of Object.entries(expected))assert.equal(state.tasks.find(item=>item.id===id)?.skill,skill);
+  assert.equal(state.contractors.some(item=>item.skill==='moving'),false);
 });
 
 test('good news can add budget or extend the contractual deadline',()=>{

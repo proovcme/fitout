@@ -13,7 +13,7 @@ export const metaEvents = [
         effect: "Рабочие исчезают со стройки, зато начальство запоминает вашу управляемость.",
         note: "Две смены без основной бригады.",
         deltas: { budget: 0, quality: -3, trust: 5, time: 8 },
-        scene: { actor: "boss", actorCount: 1, hideSkill: "moving", hideHours: 8 },
+        scene: { actor: "boss", actorCount: 1, hideSkill: "general", hideHours: 8 },
       },
       {
         id: "defend-brigade",
@@ -351,7 +351,7 @@ export const metaEvents = [
         effect: "Стройка замирает, зато флипчарт производит семь новых приоритетов.",
         note: "Срок страдает ради коллективного ощущения движения.",
         deltas: { budget: -45, quality: -1, trust: 6, time: 6 },
-        scene: { actor: "boss", actorCount: 4, hideSkill: "moving", hideHours: 6, lightPower: 1.5, debris: -2 },
+        scene: { actor: "boss", actorCount: 4, hideSkill: "general", hideHours: 6, lightPower: 1.5, debris: -2 },
       },
       {
         id: "issue-hard-hats",

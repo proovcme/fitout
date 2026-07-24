@@ -203,7 +203,7 @@ export function toggleInHouseDesign(state){
 export const TASK_BLUEPRINTS = [
   { id: 'survey', title: 'Зафиксировать состояние', short: 'Обход', skill: 'management', x: 1, y: 5, duration: 4, cost: 18, quality: 1, deps: [], priority: 3, color: '#b7c7b8' },
   { id: 'project', title: 'Выпустить рабочий проект', short: 'Проект', skill: 'design', x: 2, y: 3, duration: 12, cost: 72, quality: 5, deps: ['survey'], priority: 3, color: '#a58ae1' },
-  { id: 'move', title: 'Освободить open space', short: 'Переезд', skill: 'moving', x: 3, y: 4, duration: 10, cost: 86, quality: 2, deps: ['survey'], priority: 2, color: '#e9ad52' },
+  { id: 'move', title: 'Освободить open space', short: 'Вынос и перенос', skill: 'general', x: 3, y: 4, duration: 10, cost: 86, quality: 2, deps: ['survey'], priority: 2, color: '#e9ad52' },
   { id: 'electric', title: 'Перенести розетки', short: 'Электрика', skill: 'electric', x: 6, y: 2, duration: 12, cost: 128, quality: 4, deps: ['survey'], priority: 2, color: '#69bfe8' },
   { id: 'prep', title: 'Подготовить стены', short: 'Подготовка', skill: 'paint', x: 2, y: 1, duration: 13, cost: 92, quality: 4, deps: ['move'], hardDeps:['move'], priority: 2, color: '#d48f72' },
   { id: 'paint', title: 'Покрасить переговорную', short: 'Покраска', skill: 'paint', x: 1, y: 1, duration: 18, cost: 176, quality: 7, deps: ['prep'], hardDeps:['prep'], priority: 2, color: '#d87561' },
@@ -215,10 +215,9 @@ export const TASK_BLUEPRINTS = [
 
 export const CONTRACTOR_BLUEPRINTS = [
   { id: 'designers', name: 'Проектировщики', company: 'Линия допуска', skill: 'design', manpower:2, price: 82, rating: 88, speed: 1.03, quality: 1.08, color: '#a58ae1', initials: 'ЛД', quirk: 'Каждый лист имеет собственное мнение' },
-  { id: 'demolition', name: 'Демонтаж', company: 'Ничего лишнего', skill: 'demolition', manpower:7, price: 72, rating: 82, speed: 1.17, quality: .94, color: '#cf765f', initials: 'НЛ', quirk: 'Лишнее определяют после демонтажа' },
   { id: 'builders', name: 'Общестрой', company: 'Контур плюс', skill: 'construction', manpower:7, price: 96, rating: 87, speed: 1.02, quality: 1.03, color: '#b6976c', initials: 'КП', quirk: 'Уровень есть. Иногда даже строительный' },
   { id: 'engineers', name: 'Инженерные сети', company: 'Труба и данные', skill: 'engineering', manpower:5, price: 94, rating: 89, speed: 1.04, quality: 1.06, color: '#5aaecf', initials: 'ТД', quirk: 'Все сети хотят пройти в одном лотке' },
-  { id: 'movers', name: 'Перестановка', company: 'Точно Переедем', skill: 'moving', manpower:5, price: 42, rating: 86, speed: 1.15, quality: 0.97, color: '#e9ad52', initials: 'ТП', quirk: 'Теряют только мелкое' },
+  { id: 'movers', name: 'Подсобные работы', company: 'Руки на месте', skill: 'general', manpower:5, price: 42, rating: 86, speed: .94, quality: .91, color: '#e9ad52', initials: 'РМ', quirk: 'Укрывают, носят, складируют и знают короткий путь к контейнеру' },
   { id: 'painters', name: 'Маляры', company: 'Ровный слой', skill: 'paint', manpower:4, price: 68, rating: 92, speed: 1.05, quality: 1.06, color: '#d87561', initials: 'РС', quirk: 'RAL помнят на глаз' },
   { id: 'electricians', name: 'Электрики', company: 'Фаза Ноль', skill: 'electric', manpower:3, price: 54, rating: 89, speed: 1.08, quality: 1.02, color: '#69bfe8', initials: 'ФН', quirk: 'Им всегда нужен доступ' },
   { id: 'assemblers', name: 'Сборщики', company: 'Модуль Бюро', skill: 'furniture', manpower:6, price: 76, rating: 84, speed: 1.18, quality: 0.98, color: '#9d85d8', initials: 'МБ', quirk: 'Инструкция — слабость' },
@@ -252,14 +251,28 @@ export function createContractorMarket() {
 
 export function ensureWorkforceMarket(state) {
   const existing=new Map((state.contractors??[]).map(item=>[item.id,item]));
-  state.contractors=createContractorMarket().map(item=>({...item,...(existing.get(item.id)??{})}));
+  const current=createContractorMarket().map(item=>{
+    const merged={...item,...(existing.get(item.id)??{})};
+    if(item.id==='movers'||item.id.startsWith('movers-'))Object.assign(merged,{name:item.name,skill:'general',initials:item.initials});
+    return merged;
+  });
+  const legacyDemolition=[...existing.values()].filter(item=>item.id==='demolition'||item.id.startsWith('demolition-')).map(item=>({...item,name:'Общестрой и демонтаж',skill:'construction'}));
+  state.contractors=[...current,...legacyDemolition];
+  for(const relation of state.contractorNetwork??[]){
+    if(relation.specialty==='moving')relation.specialty='general';
+    if(relation.specialty==='demolition')relation.specialty='construction';
+  }
   for(const member of state.team??[])member.level=Math.max(1,Math.min(5,1+Math.floor((state.organization?.staffXp?.[member.id]??0)/2)));
   for(const contractor of state.contractors)contractor.level=Math.max(1,Math.min(5,1+Math.floor((state.organization?.contractorXp?.[contractor.id]??0)/2)));
   return state;
 }
 
 export function ensureRuntimeCrews(state){
+  const taskSkills={move:'general','demo-partitions':'construction','demo-equipment':'engineering','demo-floor':'paint','demo-ceiling':'paint'};
+  for(const task of state.tasks??[])if(taskSkills[task.id])task.skill=taskSkills[task.id];
+  for(const contractor of state.contractors??[]){if(contractor.skill==='moving')Object.assign(contractor,{skill:'general',name:'Подсобные работы'});if(contractor.skill==='demolition')Object.assign(contractor,{skill:'construction',name:'Общестрой и демонтаж'});}
   state.crews??=[];
+  for(const crew of state.crews){if(crew.skill==='moving')Object.assign(crew,{skill:'general',role:'Подсобные рабочие'});if(crew.skill==='demolition')Object.assign(crew,{skill:'construction',role:'Монтажники общестроя'});}
   if(!state.crews.some(crew=>crew.id==='foreman'))state.crews.unshift({id:'foreman',name:'Вы',role:'Генеральный директор',skill:'management',color:'#ddff55',initials:'ГД',speed:.7,quality:.92,taskId:null,x:4,y:6,state:'idle'});
   const player=state.crews.find(crew=>crew.id==='foreman');Object.assign(player,{name:'Вы',role:'Генеральный директор',skill:'management',initials:'ГД',speed:.7,quality:.92});
   if(!state.crews.some(crew=>crew.id==='general-crew'))state.crews.push({id:'general-crew',name:'Хозбригада «Сами справимся»',role:'Универсальная штатная бригада',skill:'general',color:'#9aa89d',initials:'ХБ',speed:.52,quality:.78,manpower:4,taskId:null,x:7,y:7,state:'idle',level:1});
@@ -793,7 +806,7 @@ function assignCrews(state) {
       recordCash(state,'expense','Работы',task.cost,`Материалы и работы: ${task.title}`);
       task.committed = true;
     }
-    task.status = 'active';task.profileMismatch=crew.skill!=='general'&&crew.skill!==task.skill;task.manualAssignment=false;task.manualPaused=false;
+    task.status = 'active';task.profileMismatch=crew.skill!==task.skill;task.manualAssignment=false;task.manualPaused=false;
     task.outOfSequence=task.deps.some(depId=>state.tasks.find(item=>item.id===depId)?.status!=='done');
     if(task.outOfSequence){state.quality=Math.max(0,state.quality-1.5);state.log.push({type:'risk',text:`Работы пошли не по порядку: ${task.title}`});}
     const projectReady=state.tasks.find(item=>item.id==='project')?.status==='done';
@@ -1174,7 +1187,7 @@ export function getRisk(state) {
   if (state.budget < 0) return { level: 'critical', text: 'Бюджет превышен — согласуйте резерв' };
   const readySkills = [...new Set(state.tasks.filter((task) => task.status === 'ready').map((task) => task.skill))];
   const missing = readySkills.find((skill) => !state.crews.some((crew) => crew.skill === skill||crew.skill==='general'));
-  const labels = { design:'архитектор проекта',documentation:'специалист исполнительной документации',demolition:'демонтажники',construction:'общестроительная бригада',engineering:'монтажники инженерных сетей',moving: 'перестановщики', paint: 'маляры', electric: 'электрики', furniture: 'сборщики мебели', cleaning: 'клининг' };
+  const labels = { design:'архитектор проекта',documentation:'специалист исполнительной документации',general:'подсобные рабочие',demolition:'общестроительная бригада',construction:'общестроительная бригада',engineering:'монтажники инженерных сетей',moving:'подсобные рабочие',paint:'отделочники',electric:'электрики',furniture:'сборщики мебели',cleaning:'клининг' };
   if (missing) return { level: 'warning', text: `Нет бригады: ${labels[missing] ?? missing}` };
   const deadline=state.contract?.deadlineHours??DEADLINE_HOURS;
   const qualityTarget=state.contract?.qualityTarget??78;

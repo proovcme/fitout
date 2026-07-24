@@ -29,7 +29,7 @@ test('procedural asset profiles vary offices and recognizable people', () => {
 });
 
 test('site chatter is combinatorial rather than a two-line loop', () => {
-  const lines=new Set(Array.from({length:600},(_,index)=>generateSiteLine(['management','moving','paint','electric','furniture','cleaning'][index%6],index)));
+  const lines=new Set(Array.from({length:600},(_,index)=>generateSiteLine(['management','general','paint','electric','furniture','cleaning'][index%6],index)));
   assert.ok(lines.size>=120);
   assert.ok([...lines].some(line=>line.includes('###@!#!!')));
 });

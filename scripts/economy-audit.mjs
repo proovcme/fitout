@@ -13,8 +13,8 @@ import { createCampaignOrders } from '../order-generator.js';
 
 const scenarios=[
   {name:'бережливый',contractors:['designers'],team:['doc-control'],loan:0},
-  {name:'сбалансированный',contractors:['designers','painters','electricians','cleaners'],team:[],loan:0,required:true},
-  {name:'стройимперия сразу',contractors:['designers','movers','painters','electricians','assemblers','cleaners'],team:['pm','supervision','doc-control'],loan:300},
+  {name:'сбалансированный',contractors:['movers','designers','engineers','painters','electricians','assemblers','cleaners'],team:[],loan:0,required:true},
+  {name:'стройимперия сразу',contractors:['designers','movers','engineers','painters','electricians','assemblers','cleaners'],team:['pm','supervision','doc-control'],loan:300},
 ];
 
 function simulate(spec){

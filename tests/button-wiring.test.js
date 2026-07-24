@@ -18,7 +18,7 @@ test('every delegated button family has a matching click route',()=>{
   const delegated=[
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
-    'task','priority','start-task','skip-task','hire','contract-manpower','find-contractor','event-choice','situation-choice','close-modal','close-sidebook',
+    'task','priority','start-task','skip-task','hire','contract-manpower','find-contractor','contractor-filter','event-choice','situation-choice','close-modal','close-sidebook',
     'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','order-materials','create-change','resolve-change','equip-artifact',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
@@ -106,7 +106,7 @@ test('new player tutorial opens the first story chapter and teaches flow through
   assert.match(script,/КОРОЛЁМ ГЕНПОДРЯДА/);
   assert.match(script,/БЦ «Банкрот»/);
   assert.match(script,/PS5 была единственным ликвидным активом/);
-  assert.match(script,/Сначала устраните то, что держит весь поток/);
+  assert.match(script,/Сначала освободите фронт/);
   assert.match(script,/Первый фронт — ещё не весь объект/);
   assert.match(script,/\[data-map-hire="designers"\]/);
   assert.match(script,/ГЛАВА 1 · \$\{step\.n\}\/12/);
@@ -120,6 +120,18 @@ test('tasks expose missing specialist crews and route directly to matching contr
   assert.match(script,/renderTeamBook\(findContractor\.dataset\.findContractor\)/);
   const problemSection=script.slice(script.indexOf('function taskProblem'),script.indexOf('function taskStatus'));
   assert.doesNotMatch(problemSection,/item\.skill==='general'/);
+});
+
+test('contractor market exposes explicit trade icons and every new career requires chapter one',()=>{
+  assert.match(script,/function tradeBadge\(skill\)/);
+  assert.match(script,/class="trade-badge"/);
+  assert.match(script,/data-contractor-filter=/);
+  assert.match(script,/Подсобные работы/);
+  assert.match(script,/function tutorialRequired\(\)/);
+  assert.match(script,/function careerOrders\(\)/);
+  assert.match(script,/tutorialRequired\(\)&&!order\.tutorial/);
+  assert.match(script,/Первая глава обязательна/);
+  assert.match(styles,/\.trade-filters button\.active/);
 });
 
 test('a new day resets speed and hard-blocked work cannot be selected in planning',()=>{
