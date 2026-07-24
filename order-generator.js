@@ -102,11 +102,11 @@ function idsForOrder(order){
 }
 
 export function buildTasksForOrder(order) {
-  const selected=idsForOrder(order);const works=WORK_CATALOG.filter(work=>selected.has(work.id));const totalWeight=works.reduce((sum,work)=>sum+work.costWeight,0);const areaFactor=clamp(Math.sqrt((order.area??500)/500),.58,2.15);const complexityFactor=.78+(order.complexity??2)*.075;
+  const selected=idsForOrder(order);const works=WORK_CATALOG.filter(work=>selected.has(work.id));const totalWeight=works.reduce((sum,work)=>sum+work.costWeight,0);const areaFactor=clamp(Math.sqrt((order.area??500)/500),.58,2.15);const complexityFactor=.78+(order.complexity??2)*.075;const taskCostShare=order.tutorial?.55:.58;
   return works.map((work,index)=>({
     ...work,
     duration:Math.max(2,Math.min(Math.round((order.deadlineHours??96)*.22),Math.round(work.baseDuration*areaFactor*complexityFactor))),
-    cost:Math.max(6,Math.round((order.budget??900)*.58*work.costWeight/totalWeight)),
+    cost:Math.max(6,Math.round((order.budget??900)*taskCostShare*work.costWeight/totalWeight)),
     deps:work.after.filter(id=>selected.has(id)),
     hardDeps:(work.hardAfter??[]).filter(id=>selected.has(id)),
     priority:work.category==='design'?3:['handover','finish'].includes(work.category)?1:2,
@@ -121,7 +121,7 @@ const CAMPAIGN_SPECS = [
     story:'Вы устали быть просто строителем и решили стать КОРОЛЁМ ГЕНПОДРЯДА. Для начала сняли цоколь в БЦ «Банкрот», обменяли PS5 на принтер и собрали команду людей, которым тоже было нечего терять, кроме выходных.',
     projectType:'refresh', projectTypeLabel:'Первая глава · ремонт без выселения', area:180, finishClass:'B', finishClassId:'b', finishQuality:76,
     workScopes:['electrical','lowcurrent','finishes','furniture'],
-    complexity:1, budget:760, deadlineHours:72, qualityTarget:74, location:'Москва, Басманный', mapX:28, mapY:36, color:'#ddff55',
+    complexity:1, budget:900, deadlineHours:72, qualityTarget:74, location:'Москва, Басманный', mapX:28, mapY:36, color:'#ddff55',
     riskTags:['в цоколе штаба нет окон, зато есть юридический адрес','заказчик уже выбрал цвет, но это не считается гарантией','крупные события отключены до конца первой главы'], procurement:'прямой договор и одна честная смета', visualSeed:5005,
   },
   {

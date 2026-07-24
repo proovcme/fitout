@@ -18,7 +18,7 @@ test('every delegated button family has a matching click route',()=>{
   const delegated=[
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
-    'task','priority','start-task','skip-task','hire','contract-manpower','find-contractor','contractor-filter','event-choice','situation-choice','close-modal','close-sidebook',
+    'task','priority','start-task','skip-task','hire','contract-manpower','settle-contractor','find-contractor','contractor-filter','event-choice','situation-choice','close-modal','close-sidebook',
     'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','create-change','resolve-change','equip-artifact',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
@@ -104,6 +104,10 @@ test('staff controls use player-facing language instead of internal abbreviation
 });
 
 test('new player tutorial opens the first story chapter and teaches flow through play',()=>{
+  assert.match(html,/id="storyIntroModal"/);
+  assert.match(html,/Король генподряда начинается с принтера/);
+  assert.match(script,/if\(order\.tutorial\)openStoryIntro\(\)/);
+  assert.match(styles,/\.story-intro-footer/);
   assert.match(script,/Семён/);
   assert.match(script,/КОРОЛЁМ ГЕНПОДРЯДА/);
   assert.match(script,/БЦ «Банкрот»/);

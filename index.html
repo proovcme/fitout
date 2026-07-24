@@ -135,6 +135,14 @@
             <p class="situation-inbox-empty" id="situationInboxEmpty">Пока никто не требует решить судьбу одной розетки.</p>
             <div class="situation-inbox-list" id="situationInbox"></div>
           </section>
+          <section class="site-contractor-roster" aria-labelledby="siteContractorRosterTitle">
+            <div class="situation-inbox-heading">
+              <div><span class="eyebrow">ЛЮДИ И ДЕНЬГИ</span><h3 id="siteContractorRosterTitle">Подрядчики на объекте</h3></div>
+              <span class="counter" id="siteContractorCount">0</span>
+            </div>
+            <p class="panel-hint contractor-roster-hint">Бригада не уходит сама: ожидание тоже входит в ежедневное содержание. Снять её можно на вечернем закрытии.</p>
+            <div class="site-contractor-list" id="siteContractorRoster"></div>
+          </section>
           <div class="contractor-list" id="contractorList" hidden></div>
           <div class="crew-list" id="crewList" hidden></div>
         </aside>
@@ -176,6 +184,23 @@
           <button class="secondary-button auth-register" id="registerButton" type="button">Создать нового игрока</button>
           <small>Сохранения синхронизируются с VPS. В браузере остаётся резервная копия.</small>
         </form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="storyIntroModal" role="dialog" aria-modal="true" aria-labelledby="storyIntroTitle">
+      <section class="story-intro-modal">
+        <button class="modal-close" id="closeStoryIntro" aria-label="Перейти к переговорам">×</button>
+        <div class="story-intro-art" aria-label="Будущий король генподряда и его первая строительная команда">
+          <span class="story-chapter">ГЛАВА 1 · ЦОКОЛЬ ПРИНИМАЕТ КАПИТАНА</span>
+        </div>
+        <div class="story-intro-copy">
+          <span class="eyebrow">FITOUT SIMULATOR · НАЧАЛО КАРЬЕРЫ</span>
+          <h1 id="storyIntroTitle">Король генподряда начинается с принтера</h1>
+          <p>Вы устали быть просто строителем. Строитель отвечает за свою работу, а генподрядчик — за все работы, включая те, о существовании которых узнаёт из претензии заказчика. Поэтому вы решили стать КОРОЛЁМ ГЕНПОДРЯДА. Короны пока нет, зато есть каска, которая почти подходит по размеру.</p>
+          <p>Штаб сняли в цоколе БЦ «Банкрот»: окно в договоре есть, в помещении — нет. PS5 обменяли на принтер с поверенной рулеткой в комплекте. Принтер печатает с полосой, рулетка врёт на три миллиметра, но вместе они уже выглядят как производственная база. Вокруг собрались люди, которым тоже было нечего терять, кроме выходных.</p>
+          <p>Первый заказ — переговорная к понедельнику. Деньги заказчика выглядят настоящими, срок — декоративным, а офис продолжает жить внутри будущей стройки. Где-то впереди лежит целое море чужих объектов. Но сначала надо пережить один кабинет и доказать, что обещание открыть офис — это ещё не график.</p>
+          <div class="story-intro-footer"><small>У каждой великой строительной империи был первый акт. Обычно с замечаниями.</small><button class="primary-button" id="continueStoryIntro">Взять первый объект →</button></div>
+        </div>
       </section>
     </div>
 

@@ -36,6 +36,7 @@ const DEFAULT_ORGANIZATION = {
   totalProfit:0,
   inHouseDesign:false,
   history:[],
+  contractorClaims:[],
 };
 
 export function ensureOrganization(state) {
@@ -51,6 +52,7 @@ export function ensureOrganization(state) {
   state.organization.playerXp??=state.organization.projectsCompleted*90;
   state.organization.staffXp??={};
   state.organization.contractorXp??={};
+  state.organization.contractorClaims??=[];
   if(!state.organization.loans.length&&state.organization.debt>0) {
     const remaining=Math.round(state.organization.debt);
     state.organization.loans.push({id:`legacy-${Date.now()}`,principal:remaining,remaining,monthlyPayment:Math.max(24,Math.ceil(remaining/12)),rate:0,termMonths:12,nextDueMonth:Math.floor(state.organization.calendarDay/30)+1,arrears:0,label:'Старый долг'});
@@ -157,7 +159,12 @@ export function settleProjectEconomy(state) {
   const organization=ensureOrganization(state);
   if(state.projectSettlement)return state.projectSettlement;
   const loanSummary=syncOrganizationCalendar(state,true);
-  const finance=ensureProjectFinance(state);const cashTransfer=Math.max(0,Math.round(state.budget));const profit=Math.round((finance.received??0)-(finance.spent??0)-(state.organizationMobilization??0));
+  const finance=ensureProjectFinance(state);
+  const outstandingContractorSettlements=(state.contractors??[]).reduce((sum,contractor)=>{
+    if((contractor.settlementDue??0)>0)registerUnpaidContractorClaim(state,contractor);
+    return sum+Math.max(0,contractor.settlementDue??0);
+  },0);
+  const cashTransfer=Math.max(0,Math.round(state.budget));const profit=Math.round((finance.received??0)-(finance.spent??0)-(state.organizationMobilization??0)-outstandingContractorSettlements);
   if(cashTransfer>0)postLedgerEntry(state,{type:'income',category:'Результат объекта',amount:cashTransfer,projectId:state.selectedOrder?.id,text:`Остаток средств объекта: ${state.selectedOrder?.title??'объект'}`});
   organization.totalProfit+=profit;
   organization.projectsCompleted+=1;
@@ -271,6 +278,10 @@ export function ensureRuntimeCrews(state){
   const taskSkills={move:'general','demo-partitions':'construction','demo-equipment':'engineering','demo-floor':'paint','demo-ceiling':'paint'};
   for(const task of state.tasks??[])if(taskSkills[task.id])task.skill=taskSkills[task.id];
   for(const contractor of state.contractors??[]){if(contractor.skill==='moving')Object.assign(contractor,{skill:'general',name:'Подсобные работы'});if(contractor.skill==='demolition')Object.assign(contractor,{skill:'construction',name:'Общестрой и демонтаж'});}
+  for(const contractor of state.contractors?.filter(item=>item.hired)??[]){
+    contractor.settlementDue??=0;
+    contractor.settlementEarned??=state.tasks?.some(task=>task.lastCrewId===`crew-${contractor.id}`)??false;
+  }
   state.crews??=[];
   for(const crew of state.crews){if(crew.skill==='moving')Object.assign(crew,{skill:'general',role:'Подсобные рабочие'});if(crew.skill==='demolition')Object.assign(crew,{skill:'construction',role:'Монтажники общестроя'});}
   if(!state.crews.some(crew=>crew.id==='foreman'))state.crews.unshift({id:'foreman',name:'Вы',role:'Генеральный директор',skill:'management',color:'#ddff55',initials:'ГД',speed:.7,quality:.92,taskId:null,x:4,y:6,state:'idle'});
@@ -531,7 +542,15 @@ export function hardTaskBlockers(state,taskOrId) {
   const catalogHardDeps=WORK_BY_ID.get(task.id)?.hardAfter??[];
   const presentCatalogDeps=catalogHardDeps.filter(id=>state.tasks.some(item=>item.id===id));
   task.hardDeps=[...new Set([...(Array.isArray(task.hardDeps)?task.hardDeps:[]),...presentCatalogDeps])];
-  return task.hardDeps.map(id=>state.tasks.find(item=>item.id===id)).filter(item=>item&&!['done','skipped','awaiting'].includes(item.status));
+  const blockers=task.hardDeps.map(id=>state.tasks.find(item=>item.id===id)).filter(item=>item&&!['done','skipped','awaiting'].includes(item.status));
+  if(task.id==='clean'){
+    const physicalCategories=new Set(['demolition','shell','fitout','engineering','finish']);
+    for(const candidate of state.tasks){
+      if(candidate.id===task.id||['done','skipped','awaiting'].includes(candidate.status))continue;
+      if(physicalCategories.has(WORK_BY_ID.get(candidate.id)?.category)&&!blockers.includes(candidate))blockers.push(candidate);
+    }
+  }
+  return blockers;
 }
 
 export function unlockTasks(state) {
@@ -579,7 +598,7 @@ function refundProjectAndCompany(state,payment) {
 function situationRoll(state,salt=0){const value=Math.sin((state.visualSeed??17)*.017+(state.situationCount??0)*12.9898+salt)*43758.5453;return value-Math.floor(value);}
 function ambientRoll(state,salt=0){const value=Math.sin((state.visualSeed??23)*.031+(state.ambientBeatCount??0)*9.731+salt)*24634.6345;return value-Math.floor(value);}
 function applySituationDeltas(state,deltas={},text='Ситуация на объекте'){
-  const budget=deltas.budget??0;state.budget+=budget;state.elapsed+=deltas.time??0;state.quality=Math.max(0,Math.min(100,state.quality+(deltas.quality??0)));state.trust=Math.max(0,Math.min(100,state.trust+(deltas.trust??0)));
+  const budget=deltas.budget??0;state.budget+=budget;applyProductionTimeImpact(state,deltas.time??0,text);state.quality=Math.max(0,Math.min(100,state.quality+(deltas.quality??0)));state.trust=Math.max(0,Math.min(100,state.trust+(deltas.trust??0)));
   if(budget)recordCash(state,budget>0?'income':'expense','Решение',Math.abs(budget),text);
 }
 
@@ -634,6 +653,12 @@ export function closeDayFinances(state) {
   const overhead=Math.max(6,Math.round((state.selectedOrder?.area??280)/180));
   const total=teamCost+contractorCost+permanentCost+overhead;const payment=spendProjectAndCompany(state,total);if(!payment.ok){state.budget-=total;state.log.push({type:'risk',text:`Кассовый разрыв по дню: не хватает ${Math.round(total-Math.max(0,state.budget)-Math.max(0,ensureOrganization(state).cash))}К`});}
   recordCash(state,'expense','День объекта',total,`Зарплаты ${teamCost}К · подрядчики ${contractorCost}К · постоянный штат ${permanentCost}К · накладные ${overhead}К`);
+  for(const contractor of (state.contractors??[]).filter(item=>item.hired&&item.dismissAtDayEnd)){
+    const claim=registerUnpaidContractorClaim(state,contractor);
+    state.crews=state.crews.filter(item=>item.id!==`crew-${contractor.id}`);
+    contractor.hired=false;contractor.dismissAtDayEnd=false;contractor.dismissedDay=Math.floor(state.elapsed/24);
+    state.log.push({type:claim?'risk':'done',text:`${contractor.company}: бригада демобилизована после смены. Завтра содержание не начисляется.${claim?` Остаток ${claim.balance}К не оплачен.`:''}`});
+  }
   return total;
 }
 
@@ -652,7 +677,7 @@ export function hireContractor(state, contractorId) {
   if (!contractor || contractor.hired) return { ok: false, reason: 'already' };
   const mobilizationCost=Math.max(8,Math.round(contractor.price*.3));const payment=spendProjectAndCompany(state,mobilizationCost);if(!payment.ok)return payment;
   recordCash(state,'expense','Подрядчик',mobilizationCost,`Аванс 30% и мобилизация: ${contractor.company}`);
-  contractor.hired = true;contractor.payment=payment;
+  contractor.hired = true;contractor.payment=payment;contractor.settlementDue=0;contractor.settlementEarned=false;contractor.settled=false;contractor.dismissAtDayEnd=false;
   const organization=ensureOrganization(state);contractor.level=Math.max(1,Math.min(5,contractor.level??(1+Math.floor((organization.contractorXp[contractor.id]??0)/2))));
   const arrivalAt=state.started?(Math.floor(state.elapsed/24)+1)*24:state.elapsed;
   state.crews.push({
@@ -713,12 +738,43 @@ export function unhireContractor(state,contractorId) {
 export function dismissContractor(state,contractorId) {
   const contractor=state.contractors.find(item=>item.id===contractorId);
   if(!contractor?.hired||!state.started)return {ok:false,reason:'not-active'};
-  if(!state.needsReport)return {ok:false,reason:'evening-only'};
+  if(!state.needsReport){
+    contractor.dismissAtDayEnd=!contractor.dismissAtDayEnd;
+    state.log.push({type:contractor.dismissAtDayEnd?'risk':'start',text:contractor.dismissAtDayEnd?`${contractor.company}: демобилизация назначена на вечер.`:`${contractor.company}: вечерняя демобилизация отменена.`});
+    return {ok:true,contractor,scheduled:contractor.dismissAtDayEnd,cancelled:!contractor.dismissAtDayEnd};
+  }
   const crew=state.crews.find(item=>item.id===`crew-${contractor.id}`);
   if(crew?.taskId){const task=state.tasks.find(item=>item.id===crew.taskId);if(task&&!['done','blocked'].includes(task.status)){task.status='ready';task.crewId=null;}}
-  state.crews=state.crews.filter(item=>item.id!==`crew-${contractor.id}`);contractor.hired=false;contractor.dismissedDay=Math.floor(state.elapsed/24);
+  registerUnpaidContractorClaim(state,contractor);
+  state.crews=state.crews.filter(item=>item.id!==`crew-${contractor.id}`);contractor.hired=false;contractor.dismissAtDayEnd=false;contractor.dismissedDay=Math.floor(state.elapsed/24);
   state.trust=Math.max(0,state.trust-1);state.log.push({type:'risk',text:`${contractor.company} сняты с объекта. Замена — не раньше завтра.`});
   return {ok:true,contractor};
+}
+
+function registerUnpaidContractorClaim(state,contractor){
+  if(!contractor?.settlementEarned||(contractor.settlementDue??0)<=0)return null;
+  const organization=ensureOrganization(state);organization.contractorClaims??=[];
+  let claim=organization.contractorClaims.find(item=>item.contractorId===contractor.id&&item.status!=='paid');
+  if(!claim){
+    claim={id:`claim-${contractor.id}-${organization.calendarDay}`,contractorId:contractor.id,projectId:state.selectedOrder?.id,company:contractor.company,principal:contractor.settlementDue,balance:contractor.settlementDue,openedDay:organization.calendarDay,status:'overdue',lawsuitFiled:false};
+    organization.contractorClaims.unshift(claim);
+  }
+  contractor.unpaidSinceDay=claim.openedDay;contractor.claimId=claim.id;
+  return claim;
+}
+
+export function settleContractor(state,contractorId){
+  const contractor=state.contractors?.find(item=>item.id===contractorId);const organization=ensureOrganization(state);
+  const claim=organization.contractorClaims?.find(item=>item.contractorId===contractorId&&item.status!=='paid');
+  const due=Math.max(0,Math.round(claim?.balance??(contractor?.settlementEarned?contractor.settlementDue:0)??0));
+  if(!contractor||due<=0)return {ok:false,reason:'nothing-due'};
+  const payment=spendProjectAndCompany(state,due);if(!payment.ok)return payment;
+  recordCash(state,'expense',claim?.lawsuitFiled?'Судебное урегулирование':'Расчёт с подрядчиком',due,`${contractor.company}: окончательный расчёт`);
+  contractor.settlementDue=0;contractor.settled=true;contractor.unpaidSinceDay=null;contractor.claimId=null;
+  if(claim){claim.balance=0;claim.status='paid';claim.paidDay=organization.calendarDay;}
+  const relation=state.contractorNetwork?.find(item=>item.id===contractorId);if(relation)relation.relationship=Math.min(100,(relation.relationship??50)+(claim?.lawsuitFiled?0:3));
+  state.log.push({type:'done',text:`${contractor.company}: окончательный расчёт ${due}К проведён. Претензионная папка закрыта.`});
+  return {ok:true,contractor,claim,amount:due};
 }
 
 export function forceAssignCrew(state,crewId,taskId) {
@@ -727,7 +783,7 @@ export function forceAssignCrew(state,crewId,taskId) {
   const blockers=hardTaskBlockers(state,task);if(blockers.length)return {ok:false,reason:'hard-blocker',blockers};
   if(task.crewId&&task.crewId!==crew.id)return {ok:false,reason:'occupied'};
   if(crew.taskId){const previous=state.tasks.find(item=>item.id===crew.taskId);if(previous&&previous.status==='active'){previous.status='ready';previous.crewId=null;}}
-  if(!task.committed){const payment=spendProjectAndCompany(state,task.cost);if(!payment.ok)return {ok:false,reason:'budget'};task.payment=payment;recordCash(state,'expense','Работы',task.cost,`Ручной нагон: ${task.title}`);task.committed=true;}
+  if(!task.committed){const committedAmount=crew.id.startsWith('crew-')?Math.max(1,Math.round(task.cost*.88)):task.cost;const payment=spendProjectAndCompany(state,committedAmount);if(!payment.ok)return {ok:false,reason:'budget'};task.payment=payment;task.committedAmount=committedAmount;recordCash(state,'expense','Работы',committedAmount,`Ручной нагон: ${task.title}`);task.committed=true;}
   task.status='active';task.enabledToday=true;task.crewId=crew.id;task.profileMismatch=crew.skill!==task.skill;task.manualAssignment=true;task.manualPaused=false;crew.taskId=task.id;crew.state='working';
   state.log.push({type:task.profileMismatch?'risk':'start',text:`${crew.name} переброшены на «${task.short}»${task.profileMismatch?' не по профилю':''}`});
   return {ok:true,crew,task,mismatch:task.profileMismatch};
@@ -772,8 +828,17 @@ export function sendContractorEscalation(state,contractorId='all',rng=Math.rando
 
 export function cyclePriority(state, taskId) {
   const task = state.tasks.find((item) => item.id === taskId);
-  if (!task || ['done', 'active','awaiting'].includes(task.status)) return false;
+  if (!task || ['done','awaiting'].includes(task.status)) return false;
   task.priority = task.priority === 3 ? 1 : task.priority + 1;
+  const canTakeTask=(crew,candidate)=>candidate.status==='ready'&&candidate.enabledToday&&!candidate.crewId&&(crew.skill===candidate.skill||crew.skill==='general');
+  for(const crew of state.crews){
+    const active=state.tasks.find(candidate=>candidate.id===crew.taskId);
+    const best=state.tasks.filter(candidate=>canTakeTask(crew,candidate)).sort((a,b)=>b.priority-a.priority||a.duration-b.duration)[0];
+    if(!active||active.manualAssignment||!best||best.priority<=active.priority)continue;
+    active.status='ready';active.crewId=null;crew.taskId=null;crew.state='idle';
+    state.log.push({type:'start',text:`Приоритет сработал: ${crew.name} переключаются с «${active.short}» на «${best.short}».`});
+  }
+  assignCrews(state);
   return true;
 }
 
@@ -788,7 +853,7 @@ function availableTaskForCrew(state, crew) {
     .filter((task) => task.status === 'ready' && (task.skill === crew.skill||crew.skill==='general') && task.enabledToday)
     .filter(task=>crew.skill!=='general'||!state.crews.some(other=>other.id!==crew.id&&other.skill===task.skill&&!other.taskId&&(other.unavailableUntil??0)<=state.elapsed))
     .filter((task) => !task.crewId)
-    .sort((a, b) => state.team?.find(member=>member.id==='pm')?.hired ? b.priority - a.priority || a.duration - b.duration : a.duration-b.duration)[0];
+    .sort((a, b) => b.priority-a.priority||a.duration-b.duration)[0];
 }
 
 function assignCrews(state) {
@@ -800,14 +865,16 @@ function assignCrews(state) {
       continue;
     }
     if (!task.committed) {
-      const payment=spendProjectAndCompany(state,task.cost);
+      const committedAmount=crew.id.startsWith('crew-')?Math.max(1,Math.round(task.cost*.88)):task.cost;
+      const payment=spendProjectAndCompany(state,committedAmount);
       if (!payment.ok) {
         task.status = 'blocked';
         state.log.push({ type: 'risk', text: `Не хватает бюджета на «${task.title}»` });
         continue;
       }
       task.payment=payment;
-      recordCash(state,'expense','Работы',task.cost,`Материалы и работы: ${task.title}`);
+      task.committedAmount=committedAmount;
+      recordCash(state,'expense','Работы',committedAmount,`Материалы и работы: ${task.title}`);
       task.committed = true;
     }
     task.status = 'active';task.profileMismatch=crew.skill!==task.skill;task.manualAssignment=false;task.manualPaused=false;
@@ -894,6 +961,13 @@ function completeTask(state, task, crew) {
   task.crewId = null;
   crew.taskId = null;
   crew.state = 'idle';
+  const contractor=state.contractors?.find(item=>`crew-${item.id}`===crew.id);
+  if(contractor){
+    const retained=Math.max(0,Math.round((task.cost??0)-(task.committedAmount??task.cost??0)));
+    contractor.settlementDue=(contractor.settlementDue??0)+retained;
+    contractor.settlementEarned=contractor.settlementDue>0;
+    contractor.settled=false;
+  }
   crew.x = task.x;
   crew.y = task.y;
   if(task.skill==='cleaning')state.siteDirt=0;
@@ -982,7 +1056,8 @@ function queueTimedEvents(state) {
   const slotsUsed=()=>state.eventCountsByDay[eventDay]??0;
   let queuedThisPass=false;
   state.nextMajorEventAt??=0;
-  const queueMajor=(id)=>{if(slotsUsed()>=5||queuedThisPass||state.eventQueue.length||state.elapsed<state.nextMajorEventAt)return false;state.eventCountsByDay[eventDay]=slotsUsed()+1;state.eventQueue.push(id);state.paused=true;queuedThisPass=true;state.nextMajorEventAt=state.elapsed+.65;return true;};
+  const shiftWarmupUntil=(state.shiftStartedAt??eventDay*24)+.75;
+  const queueMajor=(id)=>{if(slotsUsed()>=5||queuedThisPass||state.eventQueue.length||state.elapsed<state.nextMajorEventAt||state.elapsed<shiftWarmupUntil)return false;state.eventCountsByDay[eventDay]=slotsUsed()+1;state.eventQueue.push(id);state.paused=true;queuedThisPass=true;state.nextMajorEventAt=state.elapsed+1.35;return true;};
   const paintTask=state.tasks.find(task=>['paint','wall-finish'].includes(task.id));
   const prepTask=state.tasks.find(task=>['prep','protection','partitions'].includes(task.id));
   const paintIsCurrent=paintTask?.status==='active'||paintTask?.enabledToday||prepTask?.status==='done';
@@ -996,12 +1071,30 @@ function queueTimedEvents(state) {
     if(state.elapsed>=scheduledEvent.hour&&!state.eventsSeen.includes(seenId)) {
       if(scheduledEvent.occurs===false||slotsUsed()>=5){state.eventsSeen.push(seenId);return;}
       if(!isEventRelevant(state,event)){scheduledEvent.hour=state.elapsed+.65;return;}
-      if(queueMajor(scheduledEvent.id))state.eventsSeen.push(seenId);else scheduledEvent.hour=state.elapsed+.35;
+      if(queueMajor(scheduledEvent.id))state.eventsSeen.push(seenId);else scheduledEvent.hour=Math.max(scheduledEvent.hour,state.elapsed+.45);
     }
   });
   if(state.sceneEffect?.expiresAt&&state.elapsed>=state.sceneEffect.expiresAt) {
     state.sceneEffect=null;
   }
+}
+
+function applyProductionTimeImpact(state,hours=0,reason='Событие') {
+  if(!hours)return;
+  if(hours>0){
+    state.productionDelayHours=(state.productionDelayHours??0)+hours;
+    state.productionDelayReason=reason;
+    return;
+  }
+  let credit=Math.abs(hours);
+  const active=state.tasks.filter(task=>task.status==='active').sort((a,b)=>b.priority-a.priority);
+  for(const task of active){
+    if(credit<=0)break;
+    const useful=Math.min(credit,Math.max(0,(1-task.progress)*task.duration));
+    task.progress=Math.min(.99,task.progress+useful/task.duration);
+    credit-=useful;
+  }
+  state.productionTimeCredit=(state.productionTimeCredit??0)+Math.abs(hours)-credit;
 }
 
 export function applyEventChoice(state, eventId, choiceId) {
@@ -1018,7 +1111,7 @@ export function applyEventChoice(state, eventId, choiceId) {
   }
   if (eventId === 'noise') {
     if (choiceId === 'quiet') {
-      state.elapsed += 5;
+      applyProductionTimeImpact(state,5,'Ограничение шума');
       state.trust += 3;
     } else {
       state.budget -= 28;
@@ -1040,7 +1133,7 @@ export function applyEventChoice(state, eventId, choiceId) {
       state.budget -= 36;
       state.trust += 2;
     } else {
-      state.elapsed += 6;
+      applyProductionTimeImpact(state,6,'Обычная доставка');
       state.quality += 1;
     }
   }
@@ -1049,7 +1142,7 @@ export function applyEventChoice(state, eventId, choiceId) {
       state.budget -= 24;
       state.trust += 2;
     } else {
-      state.elapsed += 8;
+      applyProductionTimeImpact(state,8,'Согласование календаря');
       state.trust -= 2;
     }
   }
@@ -1058,7 +1151,7 @@ export function applyEventChoice(state, eventId, choiceId) {
       state.budget -= 8;
       state.trust += 3;
     } else {
-      state.elapsed += 7;
+      applyProductionTimeImpact(state,7,'Ожидание заказчика');
       state.trust -= 3;
     }
   }
@@ -1068,7 +1161,7 @@ export function applyEventChoice(state, eventId, choiceId) {
       state.trust -= 2;
     } else {
       state.budget -= 62;
-      state.elapsed += 3;
+      applyProductionTimeImpact(state,3,'Ожидание мебели');
       state.quality += 3;
     }
   }
@@ -1076,7 +1169,7 @@ export function applyEventChoice(state, eventId, choiceId) {
   state.trust = Math.max(0, Math.min(100, state.trust));
   const budgetDelta=state.budget-budgetBefore;if(budgetDelta)recordCash(state,budgetDelta>0?'income':'expense','Событие',Math.abs(budgetDelta),eventId);
   state.eventQueue = state.eventQueue.filter((id) => id !== eventId);
-  state.nextMajorEventAt=Math.max(state.nextMajorEventAt??0,state.elapsed+.65);
+  state.nextMajorEventAt=Math.max(state.nextMajorEventAt??0,state.elapsed+1.35);
   state.paused = false;
 }
 
@@ -1089,7 +1182,7 @@ export function applyCatalogEventChoice(state, event, choiceId) {
   if(deltas.budget)recordCash(state,deltas.budget>0?'income':'expense',option.financial==='client-extra'?'Допфинансирование заказчика':'Событие',Math.abs(deltas.budget),event.title,{clientPayment:option.financial==='client-extra'&&deltas.budget>0});
   state.quality+=deltas.quality??0;
   state.trust+=deltas.trust??0;
-  state.elapsed+=deltas.time??0;
+  applyProductionTimeImpact(state,deltas.time??0,event.title);
   if(deltas.deadline)state.contract.deadlineHours=Math.max(9,state.contract.deadlineHours+deltas.deadline);
   const scene={...(option.scene??{})};
   const duration=Math.max(5,scene.hideHours??8);
@@ -1107,7 +1200,7 @@ export function applyCatalogEventChoice(state, event, choiceId) {
   state.quality=Math.max(0,Math.min(100,state.quality));
   state.trust=Math.max(0,Math.min(100,state.trust));
   state.eventQueue=state.eventQueue.filter(id=>id!==event.id);
-  state.nextMajorEventAt=Math.max(state.nextMajorEventAt??0,state.elapsed+.65);
+  state.nextMajorEventAt=Math.max(state.nextMajorEventAt??0,state.elapsed+1.35);
   state.paused=false;
   state.log.push({type:'event',text:`Решение: ${option.title}`});
   return true;
@@ -1137,15 +1230,23 @@ export function tickState(state, deltaHours) {
   if(state.elapsed>=currentDay*24+9&&(state.reportedDay??-1)<currentDay){state.needsReport=true;state.paused=true;state.speed=1;return state;}
   const dayIndex=Math.floor(state.elapsed/24);
   if(dayIndex>state.plannedDay){state.needsPlanning=true;state.paused=true;state.speed=1;for(const task of state.tasks)task.enabledToday=false;return state;}
+  let productiveHours=deltaHours;
+  if((state.productionDelayHours??0)>0){
+    const consumed=Math.min(productiveHours,state.productionDelayHours);
+    state.productionDelayHours=Math.max(0,state.productionDelayHours-consumed);
+    productiveHours-=consumed;
+    updateAmbientActivity(state);
+    if(productiveHours<=0)return state;
+  }
   state.smokeBreak=Math.floor(state.elapsed/8)%4===2;
   updateAmbientActivity(state);
   updateSituations(state);
   unlockTasks(state);
   assignCrews(state);
-  updateCrewPositions(state, deltaHours);
+  updateCrewPositions(state, productiveHours);
   activatePendingManpower(state);
   state.siteCongestion=calculateSiteCongestion(state);
-  const cleanliness=updateSiteCleanliness(state,deltaHours);
+  const cleanliness=updateSiteCleanliness(state,productiveHours);
 
   const barkSlot = Math.floor(state.elapsed / 2.75);
   if (barkSlot > (state.lastBarkSlot ?? 0)) {
@@ -1165,7 +1266,7 @@ export function tickState(state, deltaHours) {
     const baseManpower=Math.max(1,crew.baseManpower??crewHeadcount(state,crew));const actualManpower=crewHeadcount(state,crew);const manpowerFactor=THREELESS_CLAMP(1+(actualManpower-baseManpower)*(actualManpower>=baseManpower?.06:.075),.65,1.3);
     const cleanupDistraction=task.skill==='cleaning'||NON_PHYSICAL_TASKS.has(task.id)?1:cleanliness.distraction*(state.skippedTempoFactor??1);
     const artifactSpeed=task.id==='survey'?1+bossArtifactBonus(state,'surveySpeed'):1;
-    task.progress += calculateProductionDelta({hours:deltaHours,duration:task.duration,speed:crew.speed*artifactSpeed,discipline:siteDiscipline,control:teamControl,occupancy:occupiedPenalty,mismatch:mismatchPenalty,pressure,presence:playerPresence,crowding:crowdingPenalty,manpower:manpowerFactor,cleanup:cleanupDistraction});
+    task.progress += calculateProductionDelta({hours:productiveHours,duration:task.duration,speed:crew.speed*artifactSpeed,discipline:siteDiscipline,control:teamControl,occupancy:occupiedPenalty,mismatch:mismatchPenalty,pressure,presence:playerPresence,crowding:crowdingPenalty,manpower:manpowerFactor,cleanup:cleanupDistraction});
     if (task.progress >= 1) completeTask(state, task, crew);
   }
 
