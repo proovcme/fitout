@@ -1,5 +1,6 @@
 import {
   CHANGE_ORDER_LIBRARY,
+  BOSS_ARTIFACTS,
   COMPANY_EVENT_LIBRARY,
   COMPANY_ROLES,
   EMPLOYEE_UPGRADE_TREE,
@@ -13,7 +14,7 @@ import {
 export const SAVE_SCHEMA_VERSION=2;
 export const MAX_ACTIVE_PROJECTS=3;
 
-const GLOBAL_KEYS=new Set(['schemaVersion','company','organization','portfolio','staff','contractorNetwork','market','companyCalendar','hq','playerAvatar','orderOptions','companyInbox','companyEventHistory','migration']);
+const GLOBAL_KEYS=new Set(['schemaVersion','company','organization','portfolio','staff','contractorNetwork','market','companyCalendar','hq','playerAvatar','playerArtifacts','orderOptions','companyInbox','companyEventHistory','migration']);
 const clone=(value)=>value===undefined?undefined:(globalThis.structuredClone?structuredClone(value):JSON.parse(JSON.stringify(value)));
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const projectIdOf=(state)=>state.selectedOrder?.id??`project-${state.visualSeed??Date.now()}`;
@@ -110,6 +111,10 @@ export function ensureGameSaveV2(state,seed=state?.visualSeed??17){
   state.companyInbox??=[];state.companyEventHistory??=[];
   state.portfolio??={projects:[],activeProjectId:null,maxActive:MAX_ACTIVE_PROJECTS,archive:[]};
   state.portfolio.projects??=[];state.portfolio.archive??=[];state.portfolio.maxActive=MAX_ACTIVE_PROJECTS;
+  state.playerArtifacts??={unlocked:['verified-tape'],equipped:{hand:'verified-tape',head:null,docs:null,pocket:null}};
+  state.playerArtifacts.unlocked??=['verified-tape'];state.playerArtifacts.equipped??={hand:'verified-tape',head:null,docs:null,pocket:null};
+  const completed=state.company.projectsCompleted??0;
+  for(const artifact of BOSS_ARTIFACTS)if(completed>=artifact.unlockProjects&&!state.playerArtifacts.unlocked.includes(artifact.id))state.playerArtifacts.unlocked.push(artifact.id);
   if(state.selectedOrder){
     const id=projectIdOf(state);let current=state.portfolio.projects.find(project=>project.id===id);
     if(!current){current=createProjectRecord(state);state.portfolio.projects.push(current);}
@@ -122,6 +127,19 @@ export function ensureGameSaveV2(state,seed=state?.visualSeed??17){
 export function headquartersBonus(state,key){
   const unlocked=new Set(state?.hq?.upgrades??[]);
   return HQ_UPGRADE_TREE.filter(node=>unlocked.has(node.id)).reduce((sum,node)=>sum+(node.bonuses?.[key]??0),0);
+}
+
+export function bossArtifactBonus(state,key){
+  const equipped=new Set(Object.values(state?.playerArtifacts?.equipped??{}).filter(Boolean));
+  return BOSS_ARTIFACTS.filter(item=>equipped.has(item.id)).reduce((sum,item)=>sum+(item.bonuses?.[key]??0),0);
+}
+
+export function equipBossArtifact(state,artifactId){
+  ensureGameSaveV2(state);const artifact=BOSS_ARTIFACTS.find(item=>item.id===artifactId);if(!artifact)return {ok:false,reason:'missing'};
+  if(!state.playerArtifacts.unlocked.includes(artifact.id))return {ok:false,reason:'locked',projects:artifact.unlockProjects};
+  const alreadyEquipped=state.playerArtifacts.equipped[artifact.slot]===artifact.id;
+  state.playerArtifacts.equipped[artifact.slot]=alreadyEquipped?null:artifact.id;
+  return {ok:true,artifact,equipped:!alreadyEquipped};
 }
 
 export function employeeUpgradeBonus(employee,key){
@@ -243,7 +261,7 @@ function employeeRoleScore(state,roleIds,projectId=null){
 
 export function resolveChangeOrder(state,projectId,changeId,strategy,rng=Math.random){
   ensureGameSaveV2(state);const project=state.portfolio.projects.find(item=>item.id===projectId);const change=project?.changeOrders.find(item=>item.uid===changeId);if(!change||change.status!=='requested')return {ok:false,reason:'change'};const snapshot=project.snapshot;const skill=employeeRoleScore(state,['estimator','lawyer','project-manager'],projectId);let approved=false;
-  if(strategy==='formal'){approved=rng()<clamp(.28+skill/150+headquartersBonus(state,'changeOrderChance'),0.28,.96);change.status=approved?'approved':'rejected';change.funding=approved?'client':'unfunded';if(approved){snapshot.contract.budget+=change.cost;snapshot.finance.contractValue=(snapshot.finance.contractValue??snapshot.contract.budget)+change.cost;snapshot.contract.deadlineHours+=change.durationHours;}else snapshot.trust=clamp((snapshot.trust??60)-4,0,100);}
+  if(strategy==='formal'){approved=rng()<clamp(.28+skill/150+headquartersBonus(state,'changeOrderChance')+bossArtifactBonus(state,'changeOrderChance'),0.28,.96);change.status=approved?'approved':'rejected';change.funding=approved?'client':'unfunded';if(approved){snapshot.contract.budget+=change.cost;snapshot.finance.contractValue=(snapshot.finance.contractValue??snapshot.contract.budget)+change.cost;snapshot.contract.deadlineHours+=change.durationHours;}else snapshot.trust=clamp((snapshot.trust??60)-4,0,100);}
   else if(strategy==='risk'){change.status='in-progress';change.funding='company';applyChangeWork(snapshot,change);}
   else if(strategy==='refuse'){change.status='refused';snapshot.trust=clamp((snapshot.trust??60)-12,0,100);}
   else if(strategy==='subcontract'){change.status='in-progress';change.funding='contractor';applyChangeWork(snapshot,change);createObligation(state,{direction:'payable',kind:'contractor',amount:Math.round(change.cost*.78),projectId,counterparty:'Подрядчик по изменениям',dueDay:state.companyCalendar.day+5,text:change.title});}
@@ -281,7 +299,7 @@ function accruePayroll(state,day){
 function advanceStaff(state){
   const day=state.companyCalendar.day;const payrollLate=state.company.payrollArrears>0;for(const employee of state.staff.employees.filter(item=>item.status==='employed')){
     const loaded=Boolean(employee.assignedProjectId);const stressRate=1-employeeUpgradeBonus(employee,'stressRate');const burnoutRate=1-employeeUpgradeBonus(employee,'burnoutRate');const recovery=1+headquartersBonus(state,'stressRecovery');employee.energy=clamp(employee.energy+(loaded?-10:12),0,100);employee.stress=clamp(employee.stress+((loaded?7:-9)*(!loaded?recovery:stressRate))+(payrollLate?12:0),0,100);employee.burnout=clamp(employee.burnout+((employee.stress>75?8:-3)*burnoutRate),0,100);employee.mood=clamp(employee.mood+(payrollLate?-14:loaded?-2:5),0,100);employee.loyalty=clamp(employee.loyalty+(payrollLate?-7:1),0,100);employee.quitRisk=clamp((6+employee.burnout*.45+(100-employee.loyalty)*.25+(payrollLate?25:0))*(1-employeeUpgradeBonus(employee,'quitRisk')),0,96);employee.currentThought=nextEmployeeThought(employee,day);
-    employee.developmentXp+=(loaded?24:8)*(1+headquartersBonus(state,'staffXp'));while(employee.developmentXp>=100){employee.developmentXp-=100;employee.developmentPoints+=1;employee.history.unshift({day,type:'development-point',text:'Получено очко развития за прожитый проектный опыт.'});}
+    employee.developmentXp+=(loaded?24:8)*(1+headquartersBonus(state,'staffXp')+bossArtifactBonus(state,'staffXp'));while(employee.developmentXp>=100){employee.developmentXp-=100;employee.developmentPoints+=1;employee.history.unshift({day,type:'development-point',text:'Получено очко навыков за прожитый проектный опыт.'});}
     const absenceChance=(employee.alcoholRisk*.0025)+(employee.burnout>80?.08:0);if(dayRoll(day,employee.id.length)<absenceChance){employee.unavailableUntilDay=day+1+Math.floor(dayRoll(day,employee.id.length+2)*3);employee.history.unshift({day,type:'absence',text:'Не вышел. В чате стоит одна галочка.'});state.companyInbox.unshift({id:`absence-${employee.id}-${day}`,kind:'staff',employeeId:employee.id,title:`${employee.name} не вышел`,text:'Версия отдела кадров: личные обстоятельства. Версия объекта короче.',urgent:true,createdDay:day});}
     if(dayRoll(day,employee.id.length+5)<employee.quitRisk/1000){employee.status='resigned';employee.assignedProjectId=null;employee.history.unshift({day,type:'resigned',text:'Ушёл туда, где обещали только один объект.'});state.companyInbox.unshift({id:`quit-${employee.id}-${day}`,kind:'staff',employeeId:employee.id,title:`${employee.name} увольняется`,text:'Последней каплей стала таблица с названием «финал_точно_7».',urgent:true,createdDay:day});}
     else if(dayRoll(day,employee.id.length+9)<.055){const event=PERSONAL_EVENT_LIBRARY[Math.floor(dayRoll(day,employee.id.length+13)*PERSONAL_EVENT_LIBRARY.length)];employee.stress=clamp(employee.stress+event.stress,0,100);employee.mood=clamp(employee.mood+event.mood,0,100);employee.energy=clamp(employee.energy+event.energy,0,100);state.companyInbox.unshift({id:`${event.id}-${employee.id}-${day}`,kind:'staff',employeeId:employee.id,title:event.title,text:`${employee.name}: ${event.text}`,urgent:false,createdDay:day});}

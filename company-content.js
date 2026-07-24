@@ -33,6 +33,15 @@ export const EMPLOYEE_UPGRADE_TREE=[
   {id:'leadership-2',branch:'leadership',tier:2,title:'Наставник объекта',description:'Может усилить коллегу, не добавляя его в копию каждого письма.',cost:2,requires:['leadership-1'],bonuses:{teamControl:.1},effect:'+10% к управлению назначенным объектом'},
 ];
 
+export const BOSS_ARTIFACTS=[
+  {id:'verified-tape',slot:'hand',slotTitle:'Инструмент',title:'Поверенная рулетка',description:'Её поверяли. Возможно, даже по правилам.',unlockProjects:0,bonuses:{surveySpeed:.18},effect:'Обследование на 18% быстрее'},
+  {id:'two-sim-phone',slot:'hand',slotTitle:'Инструмент',title:'Телефон с двумя SIM',description:'На одной заказчик, на второй тот же заказчик.',unlockProjects:1,bonuses:{pressureChance:.1},effect:'+10% к шансу ускорить сообщением'},
+  {id:'meeting-helmet',slot:'head',slotTitle:'Голова',title:'Белая каска совещаний',description:'Не защищает от вопросов, но внушает присутствие.',unlockProjects:1,bonuses:{presence:.07},effect:'Личный контроль даёт ещё +7% темпа'},
+  {id:'approved-stamp',slot:'docs',slotTitle:'Документы',title:'Штамп «В производство»',description:'Главное — не спрашивать, где оригинал.',unlockProjects:1,bonuses:{changeOrderChance:.07},effect:'+7% к согласованию изменений'},
+  {id:'acts-folder',slot:'docs',slotTitle:'Документы',title:'Папка актов без пропусков',description:'Редкий предмет. Некоторые считают мифическим.',unlockProjects:2,bonuses:{acceptanceChance:.08},effect:'+8% к приёмке работ'},
+  {id:'red-notebook',slot:'pocket',slotTitle:'Карман',title:'Красный блокнот обещаний',description:'Записанное обещание стареет медленнее устного.',unlockProjects:3,bonuses:{staffXp:.12},effect:'Штат получает ещё +12% опыта'},
+];
+
 export const STAFF_TRAITS=[
   {id:'steel-nerves',title:'Стальные нервы',effect:'Медленнее копит стресс'},
   {id:'remembers-promises',title:'Помнит обещания заказчика',effect:'Сильнее в претензиях'},

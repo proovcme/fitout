@@ -12,7 +12,9 @@ import {
   createMaterialOrder,
   createObligation,
   emergencyTransferEmployee,
+  equipBossArtifact,
   ensureGameSaveV2,
+  bossArtifactBonus,
   headquartersBonus,
   postLedgerEntry,
   resolveChangeOrder,
@@ -25,7 +27,7 @@ import {
   unlockHeadquartersUpgrade,
   validateGameSaveV2,
 } from '../company-core.js';
-import { CHANGE_ORDER_LIBRARY, COMPANY_EVENT_LIBRARY, EMPLOYEE_UPGRADE_TREE, HQ_UPGRADE_TREE, PERSONAL_EVENT_LIBRARY, STAFF_TRAITS, generateStaffMarket } from '../company-content.js';
+import { BOSS_ARTIFACTS, CHANGE_ORDER_LIBRARY, COMPANY_EVENT_LIBRARY, EMPLOYEE_UPGRADE_TREE, HQ_UPGRADE_TREE, PERSONAL_EVENT_LIBRARY, STAFF_TRAITS, generateStaffMarket } from '../company-content.js';
 import { createInitialState, restoreState, selectOrder } from '../game-core.js';
 import { generateOrders, makeSeededRng } from '../order-generator.js';
 import { allRandomEvents } from '../events/index.js';
@@ -92,12 +94,18 @@ test('employee tree requires points and immediately improves professional stats'
   const state=createInitialState();const employee=state.staff.employees[0];employee.developmentPoints=1;const before=employee.competence;const result=unlockEmployeeUpgrade(state,employee.id,'expertise-1');assert.equal(result.ok,true);assert.equal(employee.competence,before+8);assert.equal(employee.developmentPoints,0);assert.equal(unlockEmployeeUpgrade(state,employee.id,'expertise-2').reason,'points');
 });
 
+test('boss artifacts migrate, unlock by completed projects and provide only equipped bonuses',()=>{
+  const state=createInitialState();ensureGameSaveV2(state);assert.deepEqual(state.playerArtifacts.equipped.hand,'verified-tape');assert.equal(bossArtifactBonus(state,'surveySpeed'),.18);
+  assert.equal(equipBossArtifact(state,'acts-folder').reason,'locked');state.company.projectsCompleted=2;ensureGameSaveV2(state);assert.ok(state.playerArtifacts.unlocked.includes('acts-folder'));
+  const equipped=equipBossArtifact(state,'acts-folder');assert.equal(equipped.ok,true);assert.equal(bossArtifactBonus(state,'acceptanceChance'),.08);equipBossArtifact(state,'acts-folder');assert.equal(bossArtifactBonus(state,'acceptanceChance'),0);
+});
+
 test('payroll, office costs and crisis are simulated on the shared company calendar',()=>{
   const state=createInitialState();state.company.cash=0;for(let day=0;day<18;day++)advanceCompanyDay(state,{simulateBackground:false});assert.ok(state.company.payrollArrears>0);assert.ok(state.company.crisis);assert.ok(state.staff.employees.some(employee=>employee.mood<68));
 });
 
 test('procedural company content is broad enough for a long session',()=>{
-  assert.equal(STAFF_TRAITS.length,30);assert.equal(PERSONAL_EVENT_LIBRARY.length,60);assert.equal(COMPANY_EVENT_LIBRARY.length,40);assert.equal(CHANGE_ORDER_LIBRARY.length,30);assert.equal(HQ_UPGRADE_TREE.length,8);assert.equal(EMPLOYEE_UPGRADE_TREE.length,6);const market=generateStaffMarket(700,120);assert.equal(market.length,120);assert.ok(new Set(market.map(item=>`${item.name}:${item.role}:${item.strengths.join('-')}:${item.weakness}`)).size>=100);
+  assert.equal(STAFF_TRAITS.length,30);assert.equal(PERSONAL_EVENT_LIBRARY.length,60);assert.equal(COMPANY_EVENT_LIBRARY.length,40);assert.equal(CHANGE_ORDER_LIBRARY.length,30);assert.equal(HQ_UPGRADE_TREE.length,8);assert.equal(EMPLOYEE_UPGRADE_TREE.length,6);assert.equal(BOSS_ARTIFACTS.length,6);const market=generateStaffMarket(700,120);assert.equal(market.length,120);assert.ok(new Set(market.map(item=>`${item.name}:${item.role}:${item.strengths.join('-')}:${item.weakness}`)).size>=100);
 });
 
 test('a funded conservative company can survive a 180-day simulation',()=>{

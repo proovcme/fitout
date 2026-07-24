@@ -3,7 +3,7 @@ import { WORK_BY_ID } from './work-catalog.js';
 import { generateAmbientBeat, generateSiteLine } from './procedural-content.js';
 import { SITUATIONS, situationById } from './situations.js';
 import { randomEventById } from './events/index.js';
-import { activatePortfolioProject, calculateProductionDelta, ensureGameSaveV2, headquartersBonus, postLedgerEntry, syncActiveProjectToPortfolio } from './company-core.js';
+import { activatePortfolioProject, bossArtifactBonus, calculateProductionDelta, ensureGameSaveV2, headquartersBonus, postLedgerEntry, syncActiveProjectToPortfolio } from './company-core.js';
 
 export const INITIAL_BUDGET = 1180;
 export const DEADLINE_HOURS = 72;
@@ -157,9 +157,8 @@ export function settleProjectEconomy(state) {
   const organization=ensureOrganization(state);
   if(state.projectSettlement)return state.projectSettlement;
   const loanSummary=syncOrganizationCalendar(state,true);
-  const profit=Math.round(state.budget);
-  if(profit>0)postLedgerEntry(state,{type:'income',category:'Результат объекта',amount:profit,projectId:state.selectedOrder?.id,text:`Перенос прибыли: ${state.selectedOrder?.title??'объект'}`});
-  else if(profit<0)postLedgerEntry(state,{type:'expense',category:'Результат объекта',amount:Math.abs(profit),projectId:state.selectedOrder?.id,text:`Покрытие убытка: ${state.selectedOrder?.title??'объект'}`});
+  const finance=ensureProjectFinance(state);const cashTransfer=Math.max(0,Math.round(state.budget));const profit=Math.round((finance.received??0)-(finance.spent??0)-(state.organizationMobilization??0));
+  if(cashTransfer>0)postLedgerEntry(state,{type:'income',category:'Результат объекта',amount:cashTransfer,projectId:state.selectedOrder?.id,text:`Остаток средств объекта: ${state.selectedOrder?.title??'объект'}`});
   organization.totalProfit+=profit;
   organization.projectsCompleted+=1;
   organization.reputation=Math.max(0,Math.min(100,organization.reputation+Math.round((state.trust-65)/8)+(state.quality>=(state.contract?.qualityTarget??78)?3:-4)));
@@ -169,7 +168,7 @@ export function settleProjectEconomy(state) {
   for(const member of state.team?.filter(item=>item.hired)??[])organization.staffXp[member.id]=(organization.staffXp[member.id]??0)+1;
   for(const contractor of state.contractors?.filter(item=>item.hired)??[])organization.contractorXp[contractor.id]=(organization.contractorXp[contractor.id]??0)+1;
   const debtPayment=loanSummary.paid;
-  const settlement={profit,debtPayment,organizationCash:organization.cash,loanSummary,gainedXp,playerLevel:organization.playerLevel};
+  const settlement={profit,cashTransfer,debtPayment,organizationCash:organization.cash,loanSummary,gainedXp,playerLevel:organization.playerLevel};
   organization.history.unshift({type:'project',title:state.selectedOrder?.title??'Объект',profit,debtPayment,at:Date.now()});
   organization.history=organization.history.slice(0,30);
   state.projectSettlement=settlement;
@@ -521,7 +520,7 @@ export function unlockTasks(state) {
   for (const task of state.tasks) {
     if (task.status === 'done' || task.status === 'skipped' || task.status === 'active' || task.status === 'awaiting') continue;
     if(task.status==='blocked'){
-      if(!task.committed&&state.budget+1e-6<task.cost)continue;
+      if(!task.committed&&state.budget+Math.max(0,ensureOrganization(state).cash)+1e-6<task.cost)continue;
       task.status='ready';
     }
     if(!state.started){task.status=task.id==='survey'?'ready':'locked';continue;}
@@ -615,7 +614,7 @@ export function closeDayFinances(state) {
   const contractorCost=Math.round((state.contractors??[]).filter(item=>item.hired).reduce((sum,item)=>sum+item.price*.08,0));
   const permanentCost=ensureOrganization(state).inHouseDesign?12:0;
   const overhead=Math.max(6,Math.round((state.selectedOrder?.area??280)/180));
-  const total=teamCost+contractorCost+permanentCost+overhead;state.budget-=total;
+  const total=teamCost+contractorCost+permanentCost+overhead;const payment=spendProjectAndCompany(state,total);if(!payment.ok){state.budget-=total;state.log.push({type:'risk',text:`Кассовый разрыв по дню: не хватает ${Math.round(total-Math.max(0,state.budget)-Math.max(0,ensureOrganization(state).cash))}К`});}
   recordCash(state,'expense','День объекта',total,`Зарплаты ${teamCost}К · подрядчики ${contractorCost}К · постоянный штат ${permanentCost}К · накладные ${overhead}К`);
   return total;
 }
@@ -633,8 +632,8 @@ export function hireTeamMember(state,memberId) {
 export function hireContractor(state, contractorId) {
   const contractor = state.contractors.find((item) => item.id === contractorId);
   if (!contractor || contractor.hired) return { ok: false, reason: 'already' };
-  const payment=spendProjectAndCompany(state,contractor.price);if(!payment.ok)return payment;
-  recordCash(state,'expense','Подрядчик',contractor.price,`Мобилизация: ${contractor.company}`);
+  const mobilizationCost=Math.max(8,Math.round(contractor.price*.3));const payment=spendProjectAndCompany(state,mobilizationCost);if(!payment.ok)return payment;
+  recordCash(state,'expense','Подрядчик',mobilizationCost,`Аванс 30% и мобилизация: ${contractor.company}`);
   contractor.hired = true;contractor.payment=payment;
   const organization=ensureOrganization(state);contractor.level=Math.max(1,Math.min(5,contractor.level??(1+Math.floor((organization.contractorXp[contractor.id]??0)/2))));
   const arrivalAt=state.started?(Math.floor(state.elapsed/24)+1)*24:state.elapsed;
@@ -658,7 +657,7 @@ export function hireContractor(state, contractorId) {
     level:contractor.level,
   });
   state.log.push({ type: 'hire', text: state.started?`${contractor.company}: мобилизация подтверждена на завтра`:`${contractor.company} выходят на объект` });
-  return { ok: true, contractor, arrivalAt };
+  return { ok: true, contractor, arrivalAt, mobilizationCost };
 }
 
 export function adjustContractorManpower(state,contractorId,delta){
@@ -710,7 +709,7 @@ export function forceAssignCrew(state,crewId,taskId) {
   const blockers=hardTaskBlockers(state,task);if(blockers.length)return {ok:false,reason:'hard-blocker',blockers};
   if(task.crewId&&task.crewId!==crew.id)return {ok:false,reason:'occupied'};
   if(crew.taskId){const previous=state.tasks.find(item=>item.id===crew.taskId);if(previous&&previous.status==='active'){previous.status='ready';previous.crewId=null;}}
-  if(!task.committed){if(state.budget+1e-6<task.cost)return {ok:false,reason:'budget'};state.budget=Math.max(0,state.budget-task.cost);recordCash(state,'expense','Работы',task.cost,`Ручной нагон: ${task.title}`);task.committed=true;}
+  if(!task.committed){const payment=spendProjectAndCompany(state,task.cost);if(!payment.ok)return {ok:false,reason:'budget'};task.payment=payment;recordCash(state,'expense','Работы',task.cost,`Ручной нагон: ${task.title}`);task.committed=true;}
   task.status='active';task.enabledToday=true;task.crewId=crew.id;task.profileMismatch=crew.skill!==task.skill;task.manualAssignment=true;task.manualPaused=false;crew.taskId=task.id;crew.state='working';
   state.log.push({type:task.profileMismatch?'risk':'start',text:`${crew.name} переброшены на «${task.short}»${task.profileMismatch?' не по профилю':''}`});
   return {ok:true,crew,task,mismatch:task.profileMismatch};
@@ -730,7 +729,7 @@ export function sendPressureInstruction(state,taskId,channel='chat',rng=Math.ran
   if(!task||['done','awaiting'].includes(task.status))return {ok:false,reason:'task'};
   const day=Math.floor(state.elapsed/24);state.pressureHistory??=[];
   if(channel==='email'&&state.pressureHistory.some(item=>item.channel==='email'&&item.day===day))return {ok:false,reason:'daily-limit'};
-  const email=channel==='email';const chance=email ? .9 : .54;const worked=rng()<chance;const cost=email?10:5;
+  const email=channel==='email';const chance=Math.min(.98,(email ? .9 : .54)+bossArtifactBonus(state,'pressureChance'));const worked=rng()<chance;const cost=email?10:5;
   state.budget-=cost;recordCash(state,'expense',email?'Претензионное письмо':'Срочное сообщение',cost,task.title);state.trust=Math.max(0,state.trust-(email?1:.5));
   task.enabledToday=true;task.priority=3;task.pressureFactor=worked?(email?1.38:1.2):.92;task.pressureUntil=state.elapsed+(email?5:2.5);
   if(!worked)state.quality=Math.max(0,state.quality-.4);
@@ -783,12 +782,13 @@ function assignCrews(state) {
       continue;
     }
     if (!task.committed) {
-      if (state.budget+1e-6 < task.cost) {
+      const payment=spendProjectAndCompany(state,task.cost);
+      if (!payment.ok) {
         task.status = 'blocked';
         state.log.push({ type: 'risk', text: `Не хватает бюджета на «${task.title}»` });
         continue;
       }
-      state.budget = Math.max(0,state.budget-task.cost);
+      task.payment=payment;
       recordCash(state,'expense','Работы',task.cost,`Материалы и работы: ${task.title}`);
       task.committed = true;
     }
@@ -918,7 +918,7 @@ export function submitTaskForAcceptance(state,taskId,rng=Math.random) {
   const contractorBonus=((task.acceptanceQuality??1)-.9)*.42+(task.lastCrewLevel??1)*.018;
   const noDesignPenalty=task.buildWithoutDesign?.16:0;
   const retryBonus=(task.acceptanceAttempts??0)*.14;
-  const chance=Math.max(.3,Math.min(.97,.52+teamBonus+contractorBonus+retryBonus-noDesignPenalty));
+  const chance=Math.max(.3,Math.min(.97,.52+teamBonus+contractorBonus+retryBonus-noDesignPenalty+bossArtifactBonus(state,'acceptanceChance')));
   const accepted=rng()<chance;task.acceptanceAttempts=(task.acceptanceAttempts??0)+1;
   if(accepted){task.status='done';state.quality=Math.min(100,state.quality+(task.acceptanceQualityGain??task.quality));state.trust=Math.min(100,state.trust+1);const payment=releaseStagePayment(state,task);const finance=ensureProjectFinance(state);const paymentReason=payment?null:(finance.received??0)>=Math.round((finance.contractValue??0)*.85)-1?'retention':'no-funding';if(task.lastCrewId?.startsWith('crew-')){const contractorId=task.lastCrewId.slice(5);const organization=ensureOrganization(state);organization.contractorXp[contractorId]=(organization.contractorXp[contractorId]??0)+.5;}state.log.push({type:'done',text:`Принято: ${task.title}${payment?` · закрыто ${payment}К`:paymentReason==='retention'?' · остаток удержан до ИД':' · платёж не предусмотрен'}`});unlockTasks(state);return {ok:true,accepted:true,chance,payment,paymentReason};}
   const remedialCost=Math.max(4,Math.round(task.cost*.1));state.budget-=remedialCost;recordCash(state,'expense','Замечания при приёмке',remedialCost,task.title);
@@ -1143,10 +1143,11 @@ export function tickState(state, deltaHours) {
     if (!crew) continue;
     const siteDiscipline=state.smokeBreak&&crew.id!=='foreman'?.82:1;
     const teamControl=state.team?.find(member=>member.id==='pm')?.hired?1:.72;
-    const occupiedPenalty=state.selectedOrder?.occupiedOffice?.82:1;const mismatchPenalty=task.profileMismatch?.55:1;const pressure=state.elapsed<(task.pressureUntil??0)?(task.pressureFactor??1):1;const playerPresence=state.playerZoneTaskId===task.id?1.18:1;const crowdingPenalty=(state.siteCongestion?.penalty??1)*localCrowdingPenalty(state,task);
+    const occupiedPenalty=state.selectedOrder?.occupiedOffice?.82:1;const mismatchPenalty=task.profileMismatch?.55:1;const pressure=state.elapsed<(task.pressureUntil??0)?(task.pressureFactor??1):1;const playerPresence=state.playerZoneTaskId===task.id?1.18+bossArtifactBonus(state,'presence'):1;const crowdingPenalty=(state.siteCongestion?.penalty??1)*localCrowdingPenalty(state,task);
     const baseManpower=Math.max(1,crew.baseManpower??crewHeadcount(state,crew));const actualManpower=crewHeadcount(state,crew);const manpowerFactor=THREELESS_CLAMP(1+(actualManpower-baseManpower)*(actualManpower>=baseManpower?.06:.075),.65,1.3);
     const cleanupDistraction=task.skill==='cleaning'||NON_PHYSICAL_TASKS.has(task.id)?1:cleanliness.distraction*(state.skippedTempoFactor??1);
-    task.progress += calculateProductionDelta({hours:deltaHours,duration:task.duration,speed:crew.speed,discipline:siteDiscipline,control:teamControl,occupancy:occupiedPenalty,mismatch:mismatchPenalty,pressure,presence:playerPresence,crowding:crowdingPenalty,manpower:manpowerFactor,cleanup:cleanupDistraction});
+    const artifactSpeed=task.id==='survey'?1+bossArtifactBonus(state,'surveySpeed'):1;
+    task.progress += calculateProductionDelta({hours:deltaHours,duration:task.duration,speed:crew.speed*artifactSpeed,discipline:siteDiscipline,control:teamControl,occupancy:occupiedPenalty,mismatch:mismatchPenalty,pressure,presence:playerPresence,crowding:crowdingPenalty,manpower:manpowerFactor,cleanup:cleanupDistraction});
     if (task.progress >= 1) completeTask(state, task, crew);
   }
 

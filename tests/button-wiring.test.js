@@ -18,9 +18,17 @@ test('every delegated button family has a matching click route',()=>{
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
     'task','priority','start-task','skip-task','hire','contract-manpower','event-choice','situation-choice','close-modal','close-sidebook',
-    'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','order-materials','create-change','resolve-change',
+    'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','order-materials','create-change','resolve-change','equip-artifact',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
+});
+
+test('dismissible overlays expose a close action and Escape triggers the top one',()=>{
+  for(const id of ['briefModal','marketModal','scheduleModal','communicationModal','teamModal','financeModal','docsModal','situationModal']){
+    const start=html.indexOf(`id="${id}"`);const next=html.indexOf('<div class="modal-backdrop"',start+1);const fragment=html.slice(start,next<0?html.length:next);assert.match(fragment,/modal-close/,`${id} has no close button`);
+  }
+  assert.match(script,/event\.key!=='Escape'/);
+  assert.match(script,/querySelectorAll\('\.modal-backdrop\.visible \.modal-close'\)/);
 });
 
 test('selected player has click-to-move navigation and never joins idle wandering',()=>{
@@ -53,5 +61,37 @@ test('headquarters employees stay seated at role workstations',()=>{
   assert.doesNotMatch(hqSection,/person:\[-\.75,1\.06,Math\.PI\]/);
   assert.match(hqSection,/activity==='reviewing'/);
   assert.doesNotMatch(hqSection,/setPersonMotion\(person,'walk'\)/);
-  assert.doesNotMatch(hqSection,/requestRiggedCharacter/);
+  assert.match(hqSection,/requestRiggedCharacter/);
+});
+
+test('staff progression is explained and boss artifacts have a real loadout',()=>{
+  assert.match(script,/На объекте: \+24 за закрытый день/);
+  assert.match(script,/В штабе без назначения: \+8/);
+  assert.match(script,/Каждые 100 опыта = 1 очко навыков/);
+  assert.match(script,/function renderBossDoll\(\)/);
+  assert.match(script,/data-equip-artifact/);
+});
+
+test('new game uses the headquarters market without the obsolete map flow',()=>{
+  const resetSection=script.slice(script.indexOf('function resetGame()'),script.indexOf('function cancelCurrentOrder()'));
+  assert.match(resetSection,/companyTab='market'/);
+  assert.match(resetSection,/refs\.menu\.classList\.add\('visible'\)/);
+  assert.doesNotMatch(resetSection,/refs\.orders\.classList\.add\('visible'\)/);
+  assert.doesNotMatch(script,/Тест допа/);
+  assert.match(script,/Заказать материалы/);
+});
+
+test('staff controls use player-facing language instead of internal abbreviations',()=>{
+  assert.match(script,/Навыки · \$\{developmentPointsLabel\(employee\.developmentPoints\)\}/);
+  assert.match(script,/Перебросить сегодня/);
+  assert.match(script,/потеря 2 часов и \+15 стресса/);
+  assert.doesNotMatch(script,/Развитие · \$\{employee\.developmentPoints\} ОР/);
+  assert.match(script,/Критичные вопросы: \$\{urgent\}/);
+});
+
+test('new player tutorial teaches flow through a constraint narrative',()=>{
+  assert.match(script,/Семён/);
+  assert.match(script,/Сначала идентифицируйте ограничение потока/);
+  assert.match(script,/Лишние ресурсы перед ограничением создают очередь/);
+  assert.match(script,/Улучшение — цикл: найти, использовать, подчинить, усилить и искать заново/);
 });

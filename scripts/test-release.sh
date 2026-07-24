@@ -15,6 +15,7 @@ node --check game.js
 node --check server/server.mjs
 python3 -m py_compile server/server.py
 npm test
+npm run audit:economy
 npm run smoke:migration
 npm run build
 

@@ -55,7 +55,8 @@ test('hiring deducts mobilization and creates an autonomous crew', () => {
   const state = createInitialState();
   const result = hireContractor(state, 'painters');
   assert.equal(result.ok, true);
-  assert.equal(state.budget, 1112);
+  assert.equal(result.mobilizationCost,20);
+  assert.equal(state.budget, 1160);
   assert.equal(state.crews.at(-1).skill, 'paint');
   assert.equal(hireContractor(state, 'painters').ok, false);
 });
@@ -83,7 +84,7 @@ test('foreman automatically completes survey and unlocks parallel work', () => {
 });
 
 test('a budget-blocked task returns to the queue when financing arrives',()=>{
-  const state=createInitialState();const task=state.tasks.find(item=>item.id==='survey');state.tasks=[task];state.started=true;state.paused=false;state.plannedDay=0;state.nextMajorEventAt=999;state.eventSchedule=[];task.status='ready';task.enabledToday=true;state.budget=task.cost-1;
+  const state=createInitialState();const task=state.tasks.find(item=>item.id==='survey');state.tasks=[task];state.started=true;state.paused=false;state.plannedDay=0;state.nextMajorEventAt=999;state.eventSchedule=[];task.status='ready';task.enabledToday=true;state.budget=task.cost-1;state.company.cash=0;
   tickState(state,.1);assert.equal(task.status,'blocked');assert.equal(task.committed,false);
   state.budget=task.cost;unlockTasks(state);assert.equal(task.status,'ready');tickState(state,.1);assert.equal(task.status,'active');assert.equal(task.committed,true);assert.equal(state.budget,0);
 });
@@ -112,21 +113,18 @@ test('market incident is randomized but reproducible for tests', () => {
   assert.equal(state.trust, 70);
 });
 
-test('a well-staffed mission is winnable inside the budget and deadline', () => {
-  const state = createInitialState(() => 0); // noise is the second incident
-  state.budget += 1000;
-  for (const contractorId of ['movers','painters','electricians','assemblers','cleaners']) assert.equal(hireContractor(state, contractorId).ok, true);
-  for(const member of state.team)assert.equal(hireTeamMember(state,member.id).ok,true);
-  state.contract.budget += 1000;
-  state.contract.deadlineHours = 96;
-  state.started = true;
-  state.paused = false;
-  state.eventsSeen = ['paint-change','random-0','random-1','random-2','random-3','random-4','random-5'];
+test('the tutorial contract is honestly winnable with positive profit and no injected money', () => {
+  const state = createInitialState(() => .99,allRandomEvents);
+  assert.equal(selectOrder(state,createCampaignOrders()[0]),true);
+  state.tutorial=null;
+  for (const contractorId of ['designers','painters','electricians','cleaners']) assert.equal(hireContractor(state, contractorId).ok, true);
+  state.phase='execution';state.started = true;state.paused = false;state.eventSchedule=[];state.nextMajorEventAt=1e9;state.nextSituationAt=1e9;
   for (const task of state.tasks) task.enabledToday = true;
-  for (let hour = 0; hour < state.contract.deadlineHours && !state.completed; hour += 1) {
-    tickState(state, 1);
+  let closedDay=-1;
+  for (let step = 0; step < state.contract.deadlineHours*4 && !state.completed; step += 1) {
+    tickState(state, .25);
     for(const task of state.tasks.filter(item=>item.status==='awaiting'))submitTaskForAcceptance(state,task.id,()=>0);
-    if (state.needsReport) { state.reportedDay = Math.floor(state.elapsed / 24); state.needsReport = false; state.paused = false; }
+    if (state.needsReport) {const day=Math.floor(state.elapsed/24);if(day!==closedDay){closeDayFinances(state);closedDay=day;}state.reportedDay=day;state.needsReport = false;state.paused = false;}
     if (state.needsPlanning) {
       state.plannedDay = Math.floor(state.elapsed / 24); state.needsPlanning = false; state.paused = false;
       for (const task of state.tasks) task.enabledToday = true;
@@ -134,8 +132,8 @@ test('a well-staffed mission is winnable inside the budget and deadline', () => 
   }
   assert.equal(state.completed, true);
   assert.ok(state.elapsed <= state.contract.deadlineHours);
-  assert.ok(state.budget >= 0);
-  assert.ok(state.quality >= 78);
+  assert.ok(state.projectSettlement.profit>0);
+  assert.equal(state.organization.debt,0);
 });
 
 test('bad sequencing creates visible and costly rework', () => {
@@ -242,13 +240,13 @@ test('organization carries project profit and interest-bearing debt between proj
   assert.equal(loan.ok,true);
   assert.equal(state.organization.cash,620);
   assert.equal(state.organization.debt,loan.repayment);
-  state.started=true;state.paused=false;state.budget=-50;
+  state.started=true;state.paused=false;state.budget=0;state.finance.spent=state.finance.received+50;
   for(const task of state.tasks)task.status='done';
   tickState(state,.1);
   assert.equal(state.completed,true);
   assert.equal(state.organization.projectsCompleted,1);
   assert.equal(state.organization.totalProfit,-50);
-  assert.equal(state.organization.cash,570);
+  assert.equal(state.organization.cash,620);
 });
 
 test('campaign starts with a protected tutorial and unlocks linked orders by reputation history', () => {
@@ -378,7 +376,7 @@ test('final client retention is released only after documentation and inspection
 
 test('preparation hires can be revoked and use company cash after the advance',()=>{
   const state=createInitialState();state.phase='preparation';state.selectedOrder={id:'test'};state.budget=10;state.organization.cash=200;
-  const hired=hireContractor(state,'painters');assert.equal(hired.ok,true);assert.equal(state.budget,0);assert.equal(state.organization.cash,142);
+  const hired=hireContractor(state,'painters');assert.equal(hired.ok,true);assert.equal(state.budget,0);assert.equal(state.organization.cash,190);
   const revoked=unhireContractor(state,'painters');assert.equal(revoked.ok,true);assert.equal(state.budget,10);assert.equal(state.organization.cash,200);
   assert.equal(hireTeamMember(state,'designer').ok,true);assert.equal(unhireTeamMember(state,'designer').ok,true);
 });
