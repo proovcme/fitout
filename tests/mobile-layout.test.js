@@ -24,6 +24,13 @@ test('mobile preparation stacks the launch checklist and keeps the site action s
   assert.match(css,/\.market-roster #enterSite \{ position:sticky;/);
 });
 
+test('order dossier scrolls independently while the primary action stays visible',()=>{
+  assert.match(css,/\.order-inspector \{ display:flex; flex-direction:column; min-height:0;[^}]+overflow:hidden;/);
+  assert.match(css,/\.order-inspector #orderDetails\{flex:1 1 auto;min-height:0;[^}]+overflow-y:auto;/);
+  assert.match(css,/\.order-inspector #acceptOrder\{position:relative;z-index:2;flex:0 0 auto;width:100%;min-height:52px;/);
+  assert.match(css,/\.orders-modal \{ grid-template-columns:1fr;grid-template-rows:minmax\(230px,.72fr\) minmax\(0,1fr\);height:calc\(100dvh - 20px\)/);
+});
+
 test('tutorial does not cover main-menu or unrelated modal actions', () => {
   assert.match(game, /tutorialSuppressed=\[refs\.auth,refs\.menu,refs\.orders,refs\.result\]/);
   assert.match(game, /activeModal&&\(!target\|\|!activeModal\.contains\(target\)\)/);
