@@ -66,6 +66,10 @@ test('material packages create delivery state and a supplier payable',()=>{
   const state=projectState(41);const project=state.portfolio.projects[0];const result=createMaterialOrder(state,project.id,{title:'Перегородки и обещания',taskIds:['partitions'],amount:120,leadDays:2,paymentTermsDays:3});assert.equal(result.ok,true);assert.equal(project.materialOrders.length,1);assert.ok(state.company.obligations.some(item=>item.kind==='materials'&&item.projectId===project.id&&item.amount===120));
 });
 
+test('every selected order starts with contract, then requires team and startup materials',()=>{
+  const state=createInitialState(makeSeededRng(43),allRandomEvents);state.company.cash=5000;const order=generateOrders(makeSeededRng(43),1)[0];assert.equal(selectOrder(state,order),true);assert.equal(state.phase,'negotiation');assert.equal(state.preparationConfirmed,false);assert.equal(state.startupMaterials.ordered,false);
+});
+
 test('change orders alter real scope, contract and financing',()=>{
   const state=projectState(51);const project=state.portfolio.projects[0];const formal=createChangeOrder(state,project.id,CHANGE_ORDER_LIBRARY[0].id).change;const before=project.snapshot.contract.budget;const approved=resolveChangeOrder(state,project.id,formal.uid,'formal',()=>0);assert.equal(approved.approved,true);assert.ok(project.snapshot.contract.budget>before);
   const risky=createChangeOrder(state,project.id,CHANGE_ORDER_LIBRARY[1].id).change;const task=project.snapshot.tasks.find(item=>!['done','skipped'].includes(item.status));const duration=task.duration;resolveChangeOrder(state,project.id,risky.uid,'risk',()=>1);assert.ok(task.duration>duration);assert.equal(risky.funding,'company');

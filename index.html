@@ -297,12 +297,21 @@
           <div class="map-grid" id="mapGrid"></div>
         </div>
         <div class="market-roster">
+          <section class="prep-gates" aria-label="Чек-лист запуска объекта">
+            <header><span>ЗАПУСК ОБЪЕКТА</span><strong id="prepGateProgress">1 / 3</strong></header>
+            <ol>
+              <li class="is-done" id="prepGateContract"><i>1</i><span><strong>Договор</strong><small>Условия согласованы, аванс получен</small></span><b>✓</b></li>
+              <li id="prepGateTeam"><i>2</i><span><strong>Команда</strong><small>Выбрать людей и подтвердить состав</small></span><b>2</b></li>
+              <li id="prepGateMaterials"><i>3</i><span><strong>Материалы</strong><small>Заказать пакет для первого фронта</small></span><b>3</b></li>
+            </ol>
+          </section>
           <div class="subheading"><span>ВАША КОМАНДА</span><strong id="prepBudget"></strong></div>
           <div id="teamPicker" class="team-picker"></div>
           <div class="subheading"><span>ПОДРЯДЧИКИ</span><strong>выход на объект</strong></div>
           <div id="mapContractors" class="map-contractors"></div>
           <section class="prep-finance"><span><small>ДОСТУПНО: АВАНС + КАССА КОМПАНИИ</small><strong id="prepCombinedFunds">0 ₽</strong></span><button type="button" data-loan="300" data-loan-recipient="project">Кредит 300К на объект</button><button type="button" data-loan="800" data-loan-recipient="project">Кредит 800К на объект</button></section>
           <div class="prep-confirm"><button class="secondary-button" id="confirmPreparationButton">Подтвердить выбранный состав</button><small id="prepConfirmStatus">Состав можно менять и отзывать без штрафа.</small></div>
+          <div class="prep-materials"><button class="secondary-button" id="orderStartupMaterials" disabled>Сначала подтвердите команду</button><small id="prepMaterialsStatus">Закупка откроется после подтверждения состава.</small></div>
           <div class="prep-exit-actions"><button class="secondary-button" id="cancelPreparationButton">Отказаться и вернуться к заказам</button><button class="primary-button hero-button" id="enterSite" disabled>Выйти на объект <span>→</span></button></div>
         </div>
       </section>

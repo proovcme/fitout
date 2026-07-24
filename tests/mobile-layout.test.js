@@ -17,6 +17,13 @@ test('mobile planning scrolls tasks without moving the start-day action', () => 
   assert.match(css, /\.planning-modal #startDay \{ flex:0 0 auto; min-height:50px; \}/);
 });
 
+test('mobile preparation stacks the launch checklist and keeps the site action sticky',()=>{
+  assert.match(css,/\.prep-gates ol\{grid-template-columns:1fr\}/);
+  assert.match(css,/\.prep-confirm,\.prep-materials\{grid-template-columns:1fr\}/);
+  assert.match(css,/\.prep-exit-actions\{grid-template-columns:1fr\}/);
+  assert.match(css,/\.market-roster #enterSite \{ position:sticky;/);
+});
+
 test('tutorial does not cover main-menu or unrelated modal actions', () => {
   assert.match(game, /tutorialSuppressed=\[refs\.auth,refs\.menu,refs\.orders,refs\.result\]/);
   assert.match(game, /activeModal&&\(!target\|\|!activeModal\.contains\(target\)\)/);

@@ -19,7 +19,7 @@ test('every delegated button family has a matching click route',()=>{
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
     'task','priority','start-task','skip-task','hire','contract-manpower','find-contractor','contractor-filter','event-choice','situation-choice','close-modal','close-sidebook',
-    'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','order-materials','create-change','resolve-change','equip-artifact',
+    'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','create-change','resolve-change','equip-artifact',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
 });
@@ -79,7 +79,9 @@ test('new game uses the headquarters market without the obsolete map flow',()=>{
   assert.match(resetSection,/refs\.menu\.classList\.add\('visible'\)/);
   assert.doesNotMatch(resetSection,/refs\.orders\.classList\.add\('visible'\)/);
   assert.doesNotMatch(script,/Тест допа/);
-  assert.match(script,/Заказать материалы/);
+  assert.match(script,/Заказать первый фронт/);
+  assert.match(script,/Сначала договор, потом команда и материалы/);
+  assert.doesNotMatch(script,/data-order-materials/);
 });
 
 test('new game is a destructive two-step career reset instead of a market shortcut',()=>{

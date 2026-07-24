@@ -434,6 +434,8 @@ export function createInitialState(rng = Math.random, eventCatalog = RANDOM_EVEN
     paused: true,
     started: false,
     completed: false,
+    preparationConfirmed: false,
+    startupMaterials: { ordered: false, orderId: null, amount: 0, deliveryDay: null, taskIds: [] },
     selectedTaskId: null,
     tasks: TASK_BLUEPRINTS.map((task) => ({ ...task, progress: 0, status: 'locked', crewId: null, committed: false })),
     contractors: createContractorMarket(),
@@ -513,6 +515,8 @@ export function selectOrder(state, order) {
   state.eventIntensity=order.eventIntensity??1;
   if(state.eventIntensity>1)state.eventSchedule=state.eventSchedule.map(item=>({...item,occurs:item.occurs||item.probability*state.eventIntensity>=.72}));
   state.masterScheduleAccepted=false;
+  state.preparationConfirmed=false;
+  state.startupMaterials={ordered:false,orderId:null,amount:0,deliveryDay:null,taskIds:[]};
   state.visualSeed = order.visualSeed;
   state.tutorial=order.tutorial?{active:true,completed:false,chatSent:false,observedBuild:false,startedAt:Date.now()}:null;
   state.organizationMobilization=mobilizationCost;
