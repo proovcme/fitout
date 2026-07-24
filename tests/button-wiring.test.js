@@ -18,7 +18,7 @@ test('every delegated button family has a matching click route',()=>{
   const delegated=[
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
-    'task','priority','start-task','skip-task','hire','contract-manpower','event-choice','situation-choice','close-modal','close-sidebook',
+    'task','priority','start-task','skip-task','hire','contract-manpower','find-contractor','event-choice','situation-choice','close-modal','close-sidebook',
     'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','order-materials','create-change','resolve-change','equip-artifact',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
@@ -96,7 +96,19 @@ test('new player tutorial opens the first story chapter and teaches flow through
   assert.match(script,/БЦ «Банкрот»/);
   assert.match(script,/PS5 была единственным ликвидным активом/);
   assert.match(script,/Сначала устраните то, что держит весь поток/);
-  assert.match(script,/Завершили, приняли, получили деньги/);
+  assert.match(script,/Первый фронт — ещё не весь объект/);
+  assert.match(script,/\[data-map-hire="designers"\]/);
+  assert.match(script,/ГЛАВА 1 · \$\{step\.n\}\/12/);
+  assert.match(script,/Завершили, предъявили, приняли, получили деньги/);
+});
+
+test('tasks expose missing specialist crews and route directly to matching contractors',()=>{
+  assert.match(script,/function profileCoverage\(skill\)/);
+  assert.match(script,/НЕТ ПРОФИЛЬНОГО ИСПОЛНИТЕЛЯ/);
+  assert.match(script,/data-find-contractor=/);
+  assert.match(script,/renderTeamBook\(findContractor\.dataset\.findContractor\)/);
+  const problemSection=script.slice(script.indexOf('function taskProblem'),script.indexOf('function taskStatus'));
+  assert.doesNotMatch(problemSection,/item\.skill==='general'/);
 });
 
 test('laptop negotiation is readable and never reopens halfway down the brief',()=>{
