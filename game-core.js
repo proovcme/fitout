@@ -3,7 +3,7 @@ import { WORK_BY_ID } from './work-catalog.js';
 import { generateAmbientBeat, generateSiteLine } from './procedural-content.js';
 import { SITUATIONS, situationById } from './situations.js';
 import { randomEventById } from './events/index.js';
-import { activatePortfolioProject, calculateProductionDelta, ensureGameSaveV2, postLedgerEntry, syncActiveProjectToPortfolio } from './company-core.js';
+import { activatePortfolioProject, calculateProductionDelta, ensureGameSaveV2, headquartersBonus, postLedgerEntry, syncActiveProjectToPortfolio } from './company-core.js';
 
 export const INITIAL_BUDGET = 1180;
 export const DEADLINE_HOURS = 72;
@@ -68,7 +68,7 @@ export function takeOrganizationLoan(state,principal,requestedRecipient='auto') 
   const monthlyRate=rate/12;
   const monthlyPayment=Math.ceil(principal*monthlyRate*Math.pow(1+monthlyRate,termMonths)/(Math.pow(1+monthlyRate,termMonths)-1));
   const repayment=monthlyPayment*termMonths;
-  if(organization.debt+repayment>2400)return {ok:false,reason:'credit-limit'};
+  if(organization.debt+repayment>2400+headquartersBonus(state,'creditLimit'))return {ok:false,reason:'credit-limit'};
   const activeProject=Boolean(state.selectedOrder)&&!state.completed&&['negotiation','preparation','schedule','planning','execution'].includes(state.phase);
   const recipient=requestedRecipient==='organization'?'organization':requestedRecipient==='project'&&activeProject?'project':activeProject?'project':'organization';
   if(recipient==='project'){state.budget+=principal;recordCash(state,'income','Кредит организации',principal,'Мостовое финансирование текущего объекта');}

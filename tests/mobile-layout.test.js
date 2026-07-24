@@ -25,8 +25,9 @@ test('tutorial does not cover main-menu or unrelated modal actions', () => {
 
 test('mobile headquarters scrolls as one sheet and keeps game actions before long company cards',()=>{
   assert.match(css,/\.main-menu-modal \{ grid-template-columns: 1fr;[^}]+overflow-y:auto;[^}]+-webkit-overflow-scrolling:touch;/);
-  assert.match(css,/\.main-menu-actions \.menu-button \{ order:1; \}/);
-  assert.match(css,/\.main-menu-actions \.organization-card, \.main-menu-actions \.company-console, \.main-menu-actions \.hq-menu-card, \.main-menu-actions \.source-links \{ order:2; \}/);
-  assert.match(css,/\.company-tabs \{ display:flex; overflow-x:auto;/);
+  assert.match(css,/\.main-menu-primary-actions \{ grid-template-columns:1fr; \}/);
+  assert.match(css,/\.company-workspace \{ grid-template-columns:1fr; min-height:0; \}/);
+  assert.match(css,/\.company-tabs \{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\); \}/);
   assert.match(css,/\.company-console-content \{ max-height:none; min-height:240px; overflow:visible; \}/);
+  assert.match(css,/\.upgrade-tree,\.hq-development \.upgrade-tree \{ grid-template-columns:1fr; \}/);
 });

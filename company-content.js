@@ -13,6 +13,26 @@ export const COMPANY_ROLES=[
   {id:'lawyer',title:'Юрист',salary:175,specialties:['legal','claims'],color:'#8eb6d8'},
 ];
 
+export const HQ_UPGRADE_TREE=[
+  {id:'dispatch-desk',branch:'operations',tier:1,title:'Диспетчерская',description:'Общие экраны, единая планёрка и один файл вместо четырёх финальных.',cost:120,requires:[],hqLevel:0,bonuses:{backgroundSpeed:.1},visual:'dispatch',effect:'Фоновые объекты работают на 10% быстрее'},
+  {id:'war-room',branch:'operations',tier:2,title:'Штаб проектов',description:'Большой экран, на котором красное отставание видно даже директору.',cost:260,requires:['dispatch-desk'],hqLevel:2,bonuses:{backgroundCapacity:1},visual:'war-room',effect:'Фоновый объект ведёт на одну работу больше'},
+  {id:'cost-control',branch:'finance',tier:1,title:'Контроль затрат',description:'Сметчик и бухгалтер наконец смотрят в одну и ту же таблицу.',cost:100,requires:[],hqLevel:0,bonuses:{materialDiscount:.08},visual:'finance',effect:'Материалы дешевле на 8%'},
+  {id:'treasury',branch:'finance',tier:2,title:'Казначейство',description:'Кассовый разрыв получает имя, дату и всё равно приходит.',cost:230,requires:['cost-control'],hqLevel:2,bonuses:{creditLimit:400},visual:'treasury',effect:'Кредитный лимит выше на 400К'},
+  {id:'design-studio',branch:'design',tier:1,title:'Проектная мастерская',description:'Место, где чертежи всё-таки открывают до начала монтажа.',cost:160,requires:[],hqLevel:1,bonuses:{professionalScore:.1},visual:'design',effect:'Профильная сила специалистов выше на 10%'},
+  {id:'coordination-room',branch:'design',tier:2,title:'Комната координации',description:'Коллизии теперь находят на экране, а не перфоратором.',cost:310,requires:['design-studio'],hqLevel:3,bonuses:{changeOrderChance:.1},visual:'coordination',effect:'Шанс согласовать изменения выше на 10%'},
+  {id:'supplier-desk',branch:'supply',tier:1,title:'Стол снабжения',description:'У снабженца есть стол, телефон и список тех, кто снова обещал пятницу.',cost:130,requires:[],hqLevel:1,bonuses:{deliveryDays:1},visual:'supply',effect:'Поставки приходят на день раньше'},
+  {id:'training-room',branch:'supply',tier:2,title:'Учебный класс',description:'Сотрудники учатся на чужих ошибках. Свои уже оплачены.',cost:240,requires:['supplier-desk'],hqLevel:2,bonuses:{staffXp:.35,stressRecovery:.25},visual:'training',effect:'Опыт +35%, восстановление стресса +25%'},
+];
+
+export const EMPLOYEE_UPGRADE_TREE=[
+  {id:'expertise-1',branch:'expertise',tier:1,title:'Профильная школа',description:'Перестаёт уточнять базовые вещи в общем чате.',cost:1,requires:[],bonuses:{competence:8},effect:'+8 к компетентности'},
+  {id:'expertise-2',branch:'expertise',tier:2,title:'Признанный эксперт',description:'Его мнение теперь пересылают без подписи «надо проверить».',cost:2,requires:['expertise-1'],bonuses:{roleScore:.12},effect:'+12% к профильной силе'},
+  {id:'resilience-1',branch:'resilience',tier:1,title:'Личная система',description:'Записывает обещания и не хранит дедлайн в голове.',cost:1,requires:[],bonuses:{discipline:8,stressRate:.15},effect:'+8 к дисциплине, стресс копится медленнее'},
+  {id:'resilience-2',branch:'resilience',tier:2,title:'Неубиваемый календарь',description:'Пятничное «срочно» всё ещё раздражает, но уже не ломает человека.',cost:2,requires:['resilience-1'],bonuses:{burnoutRate:.3,quitRisk:.2},effect:'Выгорание −30%, риск ухода −20%'},
+  {id:'leadership-1',branch:'leadership',tier:1,title:'Ведёт планёрку',description:'После разговора люди хотя бы расходятся по разным задачам.',cost:1,requires:[],bonuses:{leadership:8},effect:'+8 к лидерству'},
+  {id:'leadership-2',branch:'leadership',tier:2,title:'Наставник объекта',description:'Может усилить коллегу, не добавляя его в копию каждого письма.',cost:2,requires:['leadership-1'],bonuses:{teamControl:.1},effect:'+10% к управлению назначенным объектом'},
+];
+
 export const STAFF_TRAITS=[
   {id:'steel-nerves',title:'Стальные нервы',effect:'Медленнее копит стресс'},
   {id:'remembers-promises',title:'Помнит обещания заказчика',effect:'Сильнее в претензиях'},

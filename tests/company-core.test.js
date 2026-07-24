@@ -13,6 +13,7 @@ import {
   createObligation,
   emergencyTransferEmployee,
   ensureGameSaveV2,
+  headquartersBonus,
   postLedgerEntry,
   resolveChangeOrder,
   setProjectDelegation,
@@ -20,9 +21,11 @@ import {
   simulatePortfolioDay,
   startHeadquartersProject,
   syncActiveProjectToPortfolio,
+  unlockEmployeeUpgrade,
+  unlockHeadquartersUpgrade,
   validateGameSaveV2,
 } from '../company-core.js';
-import { CHANGE_ORDER_LIBRARY, COMPANY_EVENT_LIBRARY, PERSONAL_EVENT_LIBRARY, STAFF_TRAITS, generateStaffMarket } from '../company-content.js';
+import { CHANGE_ORDER_LIBRARY, COMPANY_EVENT_LIBRARY, EMPLOYEE_UPGRADE_TREE, HQ_UPGRADE_TREE, PERSONAL_EVENT_LIBRARY, STAFF_TRAITS, generateStaffMarket } from '../company-content.js';
 import { createInitialState, restoreState, selectOrder } from '../game-core.js';
 import { generateOrders, makeSeededRng } from '../order-generator.js';
 import { allRandomEvents } from '../events/index.js';
@@ -80,12 +83,21 @@ test('headquarters improvement is a multi-day internal project',()=>{
   const state=createInitialState();state.company.cash=2000;const started=startHeadquartersProject(state);assert.equal(started.ok,true);const oldLevel=state.hq.level;assert.equal(state.hq.project.status,'active');for(let day=0;day<10&&state.hq.project.status==='active';day++)advanceCompanyDay(state,{simulateBackground:false});assert.equal(state.hq.project.status,'completed');assert.equal(state.hq.level,oldLevel+1);assert.ok(state.company.ledger.some(entry=>entry.category==='Свой офис'));
 });
 
+test('headquarters tree spends ledgered cash and changes material economics',()=>{
+  const state=projectState(71);state.company.cash=2000;const project=state.portfolio.projects[0];const beforeCash=state.company.cash;const unlocked=unlockHeadquartersUpgrade(state,'cost-control');assert.equal(unlocked.ok,true);assert.equal(headquartersBonus(state,'materialDiscount'),.08);assert.equal(state.company.cash,beforeCash-unlocked.node.cost);assert.ok(state.company.ledger.some(entry=>entry.category==='Развитие штаба'));
+  const order=createMaterialOrder(state,project.id,{amount:100,leadDays:3});assert.equal(order.order.amount,92);
+});
+
+test('employee tree requires points and immediately improves professional stats',()=>{
+  const state=createInitialState();const employee=state.staff.employees[0];employee.developmentPoints=1;const before=employee.competence;const result=unlockEmployeeUpgrade(state,employee.id,'expertise-1');assert.equal(result.ok,true);assert.equal(employee.competence,before+8);assert.equal(employee.developmentPoints,0);assert.equal(unlockEmployeeUpgrade(state,employee.id,'expertise-2').reason,'points');
+});
+
 test('payroll, office costs and crisis are simulated on the shared company calendar',()=>{
   const state=createInitialState();state.company.cash=0;for(let day=0;day<18;day++)advanceCompanyDay(state,{simulateBackground:false});assert.ok(state.company.payrollArrears>0);assert.ok(state.company.crisis);assert.ok(state.staff.employees.some(employee=>employee.mood<68));
 });
 
 test('procedural company content is broad enough for a long session',()=>{
-  assert.equal(STAFF_TRAITS.length,30);assert.equal(PERSONAL_EVENT_LIBRARY.length,60);assert.equal(COMPANY_EVENT_LIBRARY.length,40);assert.equal(CHANGE_ORDER_LIBRARY.length,30);const market=generateStaffMarket(700,120);assert.equal(market.length,120);assert.ok(new Set(market.map(item=>`${item.name}:${item.role}:${item.strengths.join('-')}:${item.weakness}`)).size>=100);
+  assert.equal(STAFF_TRAITS.length,30);assert.equal(PERSONAL_EVENT_LIBRARY.length,60);assert.equal(COMPANY_EVENT_LIBRARY.length,40);assert.equal(CHANGE_ORDER_LIBRARY.length,30);assert.equal(HQ_UPGRADE_TREE.length,8);assert.equal(EMPLOYEE_UPGRADE_TREE.length,6);const market=generateStaffMarket(700,120);assert.equal(market.length,120);assert.ok(new Set(market.map(item=>`${item.name}:${item.role}:${item.strengths.join('-')}:${item.weakness}`)).size>=100);
 });
 
 test('a funded conservative company can survive a 180-day simulation',()=>{

@@ -2,6 +2,8 @@ import {
   CHANGE_ORDER_LIBRARY,
   COMPANY_EVENT_LIBRARY,
   COMPANY_ROLES,
+  EMPLOYEE_UPGRADE_TREE,
+  HQ_UPGRADE_TREE,
   PERSONAL_EVENT_LIBRARY,
   generateEmployee,
   generateStaffMarket,
@@ -101,6 +103,8 @@ export function ensureGameSaveV2(state,seed=state?.visualSeed??17){
   state.companyCalendar??={day:state.company.calendarDay??0,month:Math.floor((state.company.calendarDay??0)/30)+1,paused:Boolean(state.paused),lastClosedDay:Math.max(-1,(state.company.calendarDay??0)-1)};
   state.companyCalendar.day??=state.company.calendarDay??0;state.company.calendarDay=state.companyCalendar.day;
   state.staff??=createStaffLayer(state,seed);state.staff.employees??=[];state.staff.candidates??=[];state.staff.assignments??=[];state.staff.outsourcedRoles??=[];
+  for(const employee of [...state.staff.employees,...state.staff.candidates]){employee.upgrades??=[];employee.developmentXp??=employee.xp??0;employee.developmentPoints??=Math.max(0,(employee.level??1)-1);}
+  state.hq??={level:0,title:'Стол у принтера'};state.hq.upgrades??=[];
   state.contractorNetwork??=createContractorNetwork(state);
   state.market??={staffSeed:seed+701,contractorSeed:seed+991,lastRefreshDay:0};
   state.companyInbox??=[];state.companyEventHistory??=[];
@@ -113,6 +117,33 @@ export function ensureGameSaveV2(state,seed=state?.visualSeed??17){
   }
   state.migration??={from:previousVersion===SAVE_SCHEMA_VERSION?'v2':'legacy',at:Date.now()};
   refreshCompanyTotals(state);return state;
+}
+
+export function headquartersBonus(state,key){
+  const unlocked=new Set(state?.hq?.upgrades??[]);
+  return HQ_UPGRADE_TREE.filter(node=>unlocked.has(node.id)).reduce((sum,node)=>sum+(node.bonuses?.[key]??0),0);
+}
+
+export function employeeUpgradeBonus(employee,key){
+  const unlocked=new Set(employee?.upgrades??[]);
+  return EMPLOYEE_UPGRADE_TREE.filter(node=>unlocked.has(node.id)).reduce((sum,node)=>sum+(node.bonuses?.[key]??0),0);
+}
+
+export function unlockHeadquartersUpgrade(state,upgradeId){
+  ensureGameSaveV2(state);const node=HQ_UPGRADE_TREE.find(item=>item.id===upgradeId);if(!node)return {ok:false,reason:'missing'};
+  const unlocked=new Set(state.hq.upgrades);if(unlocked.has(node.id))return {ok:false,reason:'unlocked'};
+  if(node.requires.some(id=>!unlocked.has(id)))return {ok:false,reason:'requires'};
+  if((state.hq.level??0)<node.hqLevel)return {ok:false,reason:'hq-level',level:node.hqLevel};
+  if(state.company.cash<node.cost)return {ok:false,reason:'cash',cost:node.cost};
+  postLedgerEntry(state,{type:'expense',category:'Развитие штаба',amount:node.cost,text:`Оснащение: ${node.title}`});state.hq.upgrades.push(node.id);state.hq.lastFailure=`В штабе появилось: ${node.title}. На этот раз эффект указан не только в презентации.`;return {ok:true,node};
+}
+
+export function unlockEmployeeUpgrade(state,employeeId,upgradeId){
+  ensureGameSaveV2(state);const employee=state.staff.employees.find(item=>item.id===employeeId&&item.status==='employed');const node=EMPLOYEE_UPGRADE_TREE.find(item=>item.id===upgradeId);if(!employee||!node)return {ok:false,reason:'missing'};
+  const unlocked=new Set(employee.upgrades);if(unlocked.has(node.id))return {ok:false,reason:'unlocked'};
+  if(node.requires.some(id=>!unlocked.has(id)))return {ok:false,reason:'requires'};
+  if(employee.developmentPoints<node.cost)return {ok:false,reason:'points',cost:node.cost};
+  employee.developmentPoints-=node.cost;employee.upgrades.push(node.id);employee.competence=clamp(employee.competence+(node.bonuses?.competence??0),0,100);employee.discipline=clamp(employee.discipline+(node.bonuses?.discipline??0),0,100);employee.leadership=clamp(employee.leadership+(node.bonuses?.leadership??0),0,100);employee.level=Math.max(employee.level,1+Math.floor(employee.upgrades.length/2));employee.history.unshift({day:state.companyCalendar.day,type:'development',text:`Освоено: ${node.title}`});return {ok:true,employee,node};
 }
 
 export function syncActiveProjectToPortfolio(state){
@@ -197,8 +228,8 @@ function refreshCompanyTotals(state){
 }
 
 export function createMaterialOrder(state,projectId,{title='Пакет материалов',taskIds=[],amount=50,quality=1,leadDays=2,certificates=true,paymentTermsDays=2}={}){
-  ensureGameSaveV2(state);const project=state.portfolio.projects.find(item=>item.id===projectId);if(!project)return {ok:false,reason:'project'};const order={id:`material-${project.materialOrders.length}-${Date.now()}`,title,taskIds:[...taskIds],amount:Math.round(amount),quality,orderedDay:state.companyCalendar.day,deliveryDay:state.companyCalendar.day+leadDays,status:'ordered',certificates,paymentTermsDays,remaining:1};project.materialOrders.push(order);
-  createObligation(state,{direction:'payable',kind:'materials',amount,projectId,counterparty:title,dueDay:order.deliveryDay+paymentTermsDays,text:`Материалы: ${title}`});return {ok:true,order};
+  ensureGameSaveV2(state);const project=state.portfolio.projects.find(item=>item.id===projectId);if(!project)return {ok:false,reason:'project'};const finalAmount=Math.max(1,Math.round(amount*(1-headquartersBonus(state,'materialDiscount'))));const finalLeadDays=Math.max(0,leadDays-headquartersBonus(state,'deliveryDays'));const order={id:`material-${project.materialOrders.length}-${Date.now()}`,title,taskIds:[...taskIds],amount:finalAmount,quality,orderedDay:state.companyCalendar.day,deliveryDay:state.companyCalendar.day+finalLeadDays,status:'ordered',certificates,paymentTermsDays,remaining:1};project.materialOrders.push(order);
+  createObligation(state,{direction:'payable',kind:'materials',amount:finalAmount,projectId,counterparty:title,dueDay:order.deliveryDay+paymentTermsDays,text:`Материалы: ${title}`});return {ok:true,order};
 }
 
 export function createChangeOrder(state,projectId,templateId=null){
@@ -207,12 +238,12 @@ export function createChangeOrder(state,projectId,templateId=null){
 
 function employeeRoleScore(state,roleIds,projectId=null){
   const employees=state.staff.employees.filter(employee=>employee.status==='employed'&&roleIds.includes(employee.roleId)&&(!projectId||employee.assignedProjectId===projectId||employee.assignedProjectId===null));
-  const own=employees.reduce((best,employee)=>Math.max(best,employee.competence+employee.level*6-employee.stress*.25),0);const outsourced=roleIds.some(id=>state.staff.outsourcedRoles.includes(id))?52:0;return Math.max(own,outsourced);
+  const hqMultiplier=1+headquartersBonus(state,'professionalScore');const own=employees.reduce((best,employee)=>Math.max(best,(employee.competence+employee.level*6-employee.stress*.25)*(1+employeeUpgradeBonus(employee,'roleScore'))*hqMultiplier),0);const outsourced=roleIds.some(id=>state.staff.outsourcedRoles.includes(id))?52:0;return Math.max(own,outsourced);
 }
 
 export function resolveChangeOrder(state,projectId,changeId,strategy,rng=Math.random){
   ensureGameSaveV2(state);const project=state.portfolio.projects.find(item=>item.id===projectId);const change=project?.changeOrders.find(item=>item.uid===changeId);if(!change||change.status!=='requested')return {ok:false,reason:'change'};const snapshot=project.snapshot;const skill=employeeRoleScore(state,['estimator','lawyer','project-manager'],projectId);let approved=false;
-  if(strategy==='formal'){approved=rng()<clamp(.28+skill/150,0.28,.92);change.status=approved?'approved':'rejected';change.funding=approved?'client':'unfunded';if(approved){snapshot.contract.budget+=change.cost;snapshot.finance.contractValue=(snapshot.finance.contractValue??snapshot.contract.budget)+change.cost;snapshot.contract.deadlineHours+=change.durationHours;}else snapshot.trust=clamp((snapshot.trust??60)-4,0,100);}
+  if(strategy==='formal'){approved=rng()<clamp(.28+skill/150+headquartersBonus(state,'changeOrderChance'),0.28,.96);change.status=approved?'approved':'rejected';change.funding=approved?'client':'unfunded';if(approved){snapshot.contract.budget+=change.cost;snapshot.finance.contractValue=(snapshot.finance.contractValue??snapshot.contract.budget)+change.cost;snapshot.contract.deadlineHours+=change.durationHours;}else snapshot.trust=clamp((snapshot.trust??60)-4,0,100);}
   else if(strategy==='risk'){change.status='in-progress';change.funding='company';applyChangeWork(snapshot,change);}
   else if(strategy==='refuse'){change.status='refused';snapshot.trust=clamp((snapshot.trust??60)-12,0,100);}
   else if(strategy==='subcontract'){change.status='in-progress';change.funding='contractor';applyChangeWork(snapshot,change);createObligation(state,{direction:'payable',kind:'contractor',amount:Math.round(change.cost*.78),projectId,counterparty:'Подрядчик по изменениям',dueDay:state.companyCalendar.day+5,text:change.title});}
@@ -231,9 +262,9 @@ function backgroundUnlock(snapshot){
 
 function simulateBackgroundProject(state,project,hours=9){
   const snapshot=project.snapshot;if(!snapshot.started||snapshot.completed)return {progress:0,completed:false};backgroundUnlock(snapshot);
-  const manager=state.staff.employees.find(item=>item.id===project.managerEmployeeId);const assigned=state.staff.employees.filter(item=>(project.staffIds??[]).includes(item.id)&&item.status==='employed');const management=(manager?.competence??35)/100;const mode=project.delegation?.mode??'supervised';const capacity=mode==='autonomous'?3:mode==='supervised'?2:1;const ready=(snapshot.tasks??[]).filter(task=>task.status==='ready').sort((a,b)=>(b.priority??1)-(a.priority??1)).slice(0,capacity);
+  const manager=state.staff.employees.find(item=>item.id===project.managerEmployeeId);const assigned=state.staff.employees.filter(item=>(project.staffIds??[]).includes(item.id)&&item.status==='employed');const management=((manager?.competence??35)/100)*(1+employeeUpgradeBonus(manager,'teamControl'));const mode=project.delegation?.mode??'supervised';const capacity=(mode==='autonomous'?3:mode==='supervised'?2:1)+Math.round(headquartersBonus(state,'backgroundCapacity'));const ready=(snapshot.tasks??[]).filter(task=>task.status==='ready').sort((a,b)=>(b.priority??1)-(a.priority??1)).slice(0,capacity);
   for(const task of ready)task.status='active';const active=(snapshot.tasks??[]).filter(task=>task.status==='active');const attention=Math.max(.45,Math.min(1.25,.62+management*.45+assigned.length*.06));let delta=0;
-  for(const task of active){const before=task.progress??0;task.progress=clamp(before+calculateProductionDelta({hours,duration:Math.max(4,task.duration),speed:attention}),0,1);delta+=task.progress-before;if(task.progress>=1){const acceptance=.45+management*.35+assigned.some(employee=>employee.roleId==='pto')*.12;if(mode!=='manual'&&dayRoll(state.companyCalendar.day,task.id.length)<acceptance){task.status='done';snapshot.quality=clamp((snapshot.quality??70)+(task.quality??1)*.4,0,100);const value=Math.max(8,Math.round(task.cost*1.15));createObligation(state,{direction:'receivable',kind:'stage-payment',amount:value,projectId:project.id,counterparty:snapshot.selectedOrder?.client??'Заказчик',dueDay:state.companyCalendar.day+2+Math.floor(dayRoll(state.companyCalendar.day,value)*5),text:`Принято: ${task.title}`});}else task.status='awaiting';}}
+  for(const task of active){const before=task.progress??0;task.progress=clamp(before+calculateProductionDelta({hours,duration:Math.max(4,task.duration),speed:attention*(1+headquartersBonus(state,'backgroundSpeed'))}),0,1);delta+=task.progress-before;if(task.progress>=1){const acceptance=.45+management*.35+assigned.some(employee=>employee.roleId==='pto')*.12;if(mode!=='manual'&&dayRoll(state.companyCalendar.day,task.id.length)<acceptance){task.status='done';snapshot.quality=clamp((snapshot.quality??70)+(task.quality??1)*.4,0,100);const value=Math.max(8,Math.round(task.cost*1.15));createObligation(state,{direction:'receivable',kind:'stage-payment',amount:value,projectId:project.id,counterparty:snapshot.selectedOrder?.client??'Заказчик',dueDay:state.companyCalendar.day+2+Math.floor(dayRoll(state.companyCalendar.day,value)*5),text:`Принято: ${task.title}`});}else task.status='awaiting';}}
   backgroundUnlock(snapshot);snapshot.elapsed=(snapshot.elapsed??0)+hours;snapshot.budget-=Math.max(4,Math.round(active.length*5+assigned.length*2));if((snapshot.tasks??[]).every(task=>['done','skipped'].includes(task.status)))snapshot.completed=true;project.summary=projectSummary(project);return {progress:delta,completed:snapshot.completed};
 }
 
@@ -249,7 +280,8 @@ function accruePayroll(state,day){
 
 function advanceStaff(state){
   const day=state.companyCalendar.day;const payrollLate=state.company.payrollArrears>0;for(const employee of state.staff.employees.filter(item=>item.status==='employed')){
-    const loaded=Boolean(employee.assignedProjectId);employee.energy=clamp(employee.energy+(loaded?-10:12),0,100);employee.stress=clamp(employee.stress+(loaded?7:-9)+(payrollLate?12:0),0,100);employee.burnout=clamp(employee.burnout+(employee.stress>75?8:-3),0,100);employee.mood=clamp(employee.mood+(payrollLate?-14:loaded?-2:5),0,100);employee.loyalty=clamp(employee.loyalty+(payrollLate?-7:1),0,100);employee.quitRisk=clamp(6+employee.burnout*.45+(100-employee.loyalty)*.25+(payrollLate?25:0),0,96);employee.currentThought=nextEmployeeThought(employee,day);
+    const loaded=Boolean(employee.assignedProjectId);const stressRate=1-employeeUpgradeBonus(employee,'stressRate');const burnoutRate=1-employeeUpgradeBonus(employee,'burnoutRate');const recovery=1+headquartersBonus(state,'stressRecovery');employee.energy=clamp(employee.energy+(loaded?-10:12),0,100);employee.stress=clamp(employee.stress+((loaded?7:-9)*(!loaded?recovery:stressRate))+(payrollLate?12:0),0,100);employee.burnout=clamp(employee.burnout+((employee.stress>75?8:-3)*burnoutRate),0,100);employee.mood=clamp(employee.mood+(payrollLate?-14:loaded?-2:5),0,100);employee.loyalty=clamp(employee.loyalty+(payrollLate?-7:1),0,100);employee.quitRisk=clamp((6+employee.burnout*.45+(100-employee.loyalty)*.25+(payrollLate?25:0))*(1-employeeUpgradeBonus(employee,'quitRisk')),0,96);employee.currentThought=nextEmployeeThought(employee,day);
+    employee.developmentXp+=(loaded?24:8)*(1+headquartersBonus(state,'staffXp'));while(employee.developmentXp>=100){employee.developmentXp-=100;employee.developmentPoints+=1;employee.history.unshift({day,type:'development-point',text:'Получено очко развития за прожитый проектный опыт.'});}
     const absenceChance=(employee.alcoholRisk*.0025)+(employee.burnout>80?.08:0);if(dayRoll(day,employee.id.length)<absenceChance){employee.unavailableUntilDay=day+1+Math.floor(dayRoll(day,employee.id.length+2)*3);employee.history.unshift({day,type:'absence',text:'Не вышел. В чате стоит одна галочка.'});state.companyInbox.unshift({id:`absence-${employee.id}-${day}`,kind:'staff',employeeId:employee.id,title:`${employee.name} не вышел`,text:'Версия отдела кадров: личные обстоятельства. Версия объекта короче.',urgent:true,createdDay:day});}
     if(dayRoll(day,employee.id.length+5)<employee.quitRisk/1000){employee.status='resigned';employee.assignedProjectId=null;employee.history.unshift({day,type:'resigned',text:'Ушёл туда, где обещали только один объект.'});state.companyInbox.unshift({id:`quit-${employee.id}-${day}`,kind:'staff',employeeId:employee.id,title:`${employee.name} увольняется`,text:'Последней каплей стала таблица с названием «финал_точно_7».',urgent:true,createdDay:day});}
     else if(dayRoll(day,employee.id.length+9)<.055){const event=PERSONAL_EVENT_LIBRARY[Math.floor(dayRoll(day,employee.id.length+13)*PERSONAL_EVENT_LIBRARY.length)];employee.stress=clamp(employee.stress+event.stress,0,100);employee.mood=clamp(employee.mood+event.mood,0,100);employee.energy=clamp(employee.energy+event.energy,0,100);state.companyInbox.unshift({id:`${event.id}-${employee.id}-${day}`,kind:'staff',employeeId:employee.id,title:event.title,text:`${employee.name}: ${event.text}`,urgent:false,createdDay:day});}

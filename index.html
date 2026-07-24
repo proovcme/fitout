@@ -188,31 +188,36 @@
           <span class="eyebrow">ПРОФИЛЬ <b id="menuProfileName">ИГРОК</b></span>
           <h1 id="mainMenuTitle">Что строим сегодня?</h1>
           <p id="continueSummary">Сохранённого объекта пока нет. Это самый спокойный момент вашей карьеры.</p>
+          <div class="main-menu-primary-actions">
+            <button class="primary-button menu-button" id="continueGameButton" type="button"><span><b>Продолжить объект</b><small>Вернуться на активную площадку</small></span><strong>→</strong></button>
+            <button class="secondary-button menu-button" id="newGameButton" type="button"><span><b>Новый заказ</b><small>Открыть рынок проектов</small></span><strong>＋</strong></button>
+          </div>
           <section class="organization-card" aria-label="Экономика организации">
             <header><span><small>ВАША ОРГАНИЗАЦИЯ</small><strong id="organizationName">ООО «Потом согласуем»</strong></span><b id="organizationCash">320 000 ₽</b></header>
             <div class="organization-metrics"><span><small>УРОВЕНЬ</small><b id="organizationLevel">1</b></span><span><small>ДОЛГ</small><b id="organizationDebt">0 ₽</b></span><span><small>ПРОЕКТЫ</small><b id="organizationProjects">0</b></span><span><small>РЕПУТАЦИЯ</small><b id="organizationReputation">50</b></span></div>
-            <div class="loan-actions"><span>В кассу организации</span><button type="button" data-loan="300" data-loan-recipient="organization">300К · 28К/мес</button><button type="button" data-loan="800" data-loan-recipient="organization">800К · 53К/мес</button></div>
           </section>
           <section class="company-console" aria-label="Управление компанией">
             <header class="company-console-head"><span><small>ЕДИНЫЙ ДЕНЬ КОМПАНИИ</small><strong id="companyDayLabel">День 1 · портфель на паузе</strong></span><b id="companyAlertCount">0 вопросов</b></header>
-            <nav class="company-tabs" aria-label="Разделы штаба">
-              <button type="button" class="active" data-company-tab="portfolio">Портфель</button>
-              <button type="button" data-company-tab="staff">Команда</button>
-              <button type="button" data-company-tab="contractors">Подрядчики</button>
-              <button type="button" data-company-tab="finance">Финансы</button>
-              <button type="button" data-company-tab="market">Рынок</button>
-              <button type="button" data-company-tab="office">Офис</button>
-            </nav>
-            <div class="company-console-content" id="companyConsoleContent"></div>
-          </section>
-          <section class="hq-menu-card" aria-label="Собственный офис">
-            <span><small>СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ <b id="hqLevel">0</b></small><strong id="hqTitle">Стол у принтера</strong><em id="hqStatus">Клиентам строим лучше, чем себе.</em></span>
-            <div class="hq-upgrades"><button type="button" id="developHqButton">Улучшить офис · <b id="hqCost">80К</b></button><button type="button" id="designOfficeButton">Проектный отдел · <b id="designOfficeStatus">нужен штаб 2</b></button></div>
-            <div class="avatar-customizer"><small>ВАШ АВАТАР</small><div><button type="button" data-avatar-color="#ddff55" title="Лайм">●</button><button type="button" data-avatar-color="#69bfe8" title="Синий">●</button><button type="button" data-avatar-color="#d87561" title="Коралловый">●</button><button type="button" data-avatar-outfit="vest">Жилет</button><button type="button" data-avatar-outfit="suit">Костюм</button><button type="button" data-avatar-helmet="classic">Каска</button><button type="button" data-avatar-helmet="visor">Визор</button><button type="button" data-avatar-helmet="cap">Кепка</button></div></div>
+            <div class="company-workspace">
+              <nav class="company-tabs" aria-label="Разделы штаба">
+                <button type="button" class="active" data-company-tab="portfolio"><i>▦</i><span><b>Объекты</b><small>Статус и решения</small></span></button>
+                <button type="button" data-company-tab="staff"><i>♟</i><span><b>Штат</b><small>Люди и назначения</small></span></button>
+                <button type="button" data-company-tab="finance"><i>₽</i><span><b>Деньги</b><small>Касса и обязательства</small></span></button>
+                <button type="button" data-company-tab="market"><i>⌖</i><span><b>Рынок</b><small>Заказы и кандидаты</small></span></button>
+                <button type="button" data-company-tab="contractors"><i>⚒</i><span><b>Подрядчики</b><small>Проверенная сеть</small></span></button>
+                <button type="button" data-company-tab="office"><i>⌂</i><span><b>Свой офис</b><small>Штаб и внешний вид</small></span></button>
+              </nav>
+              <div class="company-console-body">
+                <div class="company-console-content" id="companyConsoleContent"></div>
+                <section class="hq-menu-card" id="hqMenuCard" aria-label="Собственный офис" hidden>
+                  <span><small>СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ <b id="hqLevel">0</b></small><strong id="hqTitle">Стол у принтера</strong><em id="hqStatus">Клиентам строим лучше, чем себе.</em></span>
+                  <div class="hq-upgrades"><button type="button" id="developHqButton">Улучшить офис · <b id="hqCost">80К</b></button><button type="button" id="designOfficeButton">Проектный отдел · <b id="designOfficeStatus">нужен штаб 2</b></button></div>
+                  <div class="avatar-customizer"><small>ВАШ АВАТАР</small><div><button type="button" data-avatar-color="#ddff55" title="Лайм">●</button><button type="button" data-avatar-color="#69bfe8" title="Синий">●</button><button type="button" data-avatar-color="#d87561" title="Коралловый">●</button><button type="button" data-avatar-outfit="vest">Жилет</button><button type="button" data-avatar-outfit="suit">Костюм</button><button type="button" data-avatar-helmet="classic">Каска</button><button type="button" data-avatar-helmet="visor">Визор</button><button type="button" data-avatar-helmet="cap">Кепка</button></div></div>
+                </section>
+              </div>
+            </div>
           </section>
           <nav class="source-links" aria-label="Материалы об офисах"><a href="https://www.youtube.com/@Olsedmi" target="_blank" rel="noreferrer">▶ YouTube · Офисная среда</a><a href="https://t.me/all_about_offices" target="_blank" rel="noreferrer">➤ Telegram · Всё об офисах</a></nav>
-          <button class="primary-button menu-button" id="continueGameButton" type="button"><span><b>Продолжить</b><small>Вернуться на текущий объект</small></span><strong>→</strong></button>
-          <button class="secondary-button menu-button" id="newGameButton" type="button"><span><b>Новая игра</b><small>Сгенерировать новый рынок заказов</small></span><strong>＋</strong></button>
           <small>Прогресс сохраняется автоматически в вашем профиле.</small>
         </div>
       </section>
