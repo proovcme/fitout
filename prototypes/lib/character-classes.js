@@ -7,6 +7,8 @@ export const WORK_TYPES={
   drawings:{id:'drawings',label:'Выпускать чертежи',animation:'idle',trade:'design',station:'desk'},
   concept_design:{id:'concept_design',label:'Прорабатывать планировку',animation:'idle',trade:'architecture',station:'desk'},
   author_supervision:{id:'author_supervision',label:'Вести авторский надзор',animation:'idle',trade:'architecture',station:'inspection'},
+  coordinate_design:{id:'coordinate_design',label:'Координировать разделы проекта',animation:'idle',trade:'design_management',station:'desk'},
+  approve_architecture:{id:'approve_architecture',label:'Утверждать архитектурные решения',animation:'idle',trade:'architecture_management',station:'meeting'},
   drill_wall:{id:'drill_wall',label:'Сверлить стену',animation:'drill',trade:'electrical',station:'wall'},
   install_socket:{id:'install_socket',label:'Ставить розетки',animation:'drill',trade:'electrical',station:'socket'},
   assemble_panel:{id:'assemble_panel',label:'Собирать щит',animation:'hammer',trade:'electrical',station:'panel'},
@@ -19,7 +21,7 @@ export const WORK_TYPES={
   smoke:{id:'smoke',label:'Курить и обсуждать сроки',animation:'smoke',trade:'idle'}
 };
 
-export const REPORTING_CHAIN={worker:'foreman',electrician:'foreman',plumber:'foreman',hvac:'foreman',finisher:'foreman',foreman:'project_manager',designer:'project_manager',architect:'project_manager',engineer:'project_manager',inspector:'project_manager',client:null,project_manager:null};
+export const REPORTING_CHAIN={worker:'foreman',electrician:'foreman',plumber:'foreman',hvac:'foreman',finisher:'foreman',foreman:'project_manager',designer:'gip',engineer:'gip',architect:'gap',gip:'project_manager',gap:'project_manager',inspector:'project_manager',client:null,project_manager:null};
 
 export const CHARACTER_CLASSES={
   project_manager:{id:'project_manager',label:'Руководитель проекта',icon:'♛',primary:['plan_project','negotiate','supervise'],secondary:['inspect_work'],forbidden:['drawings','drill_wall','paint_wall','install_socket','assemble_panel','install_plumbing','install_pipes','carry_materials','cleanup'],workBias:.92,breakBias:.08},
@@ -27,6 +29,8 @@ export const CHARACTER_CLASSES={
   foreman:{id:'foreman',label:'Прораб',icon:'◆',primary:['supervise'],secondary:['carry_materials'],forbidden:['drawings','paint_wall','install_socket','assemble_panel'],workBias:.86,breakBias:.14},
   designer:{id:'designer',label:'Проектировщик',icon:'✎',primary:['drawings'],secondary:['concept_design','supervise'],forbidden:['drill_wall','paint_wall','install_socket','assemble_panel','install_plumbing','install_pipes','carry_materials','cleanup'],workBias:.9,breakBias:.1},
   architect:{id:'architect',label:'Архитектор',icon:'△',primary:['concept_design','author_supervision'],secondary:['drawings','supervise'],forbidden:['drill_wall','paint_wall','install_socket','assemble_panel','install_plumbing','install_pipes','carry_materials','cleanup'],workBias:.88,breakBias:.12},
+  gip:{id:'gip',label:'ГИП',icon:'⌘',primary:['coordinate_design','drawings','supervise'],secondary:['inspect_work','negotiate'],forbidden:['drill_wall','paint_wall','install_socket','assemble_panel','install_plumbing','install_pipes','carry_materials','cleanup'],workBias:.94,breakBias:.06},
+  gap:{id:'gap',label:'ГАП',icon:'✦',primary:['approve_architecture','concept_design','author_supervision'],secondary:['negotiate','drawings'],forbidden:['drill_wall','paint_wall','install_socket','assemble_panel','install_plumbing','install_pipes','carry_materials','cleanup'],workBias:.91,breakBias:.09},
   electrician:{id:'electrician',label:'Электрик',icon:'ϟ',primary:['drill_wall','install_socket','assemble_panel'],secondary:['carry_materials'],forbidden:['paint_wall','drawings'],workBias:.82,breakBias:.18},
   plumber:{id:'plumber',label:'Сантехник',icon:'◉',primary:['install_plumbing','install_pipes','drill_wall'],secondary:['carry_materials'],forbidden:['drawings','paint_wall','install_socket','assemble_panel'],workBias:.8,breakBias:.2},
   inspector:{id:'inspector',label:'Технадзор',icon:'✓',primary:['inspect_work'],secondary:['supervise'],forbidden:['drawings','drill_wall','paint_wall','install_socket','assemble_panel','install_plumbing','install_pipes','carry_materials','cleanup'],workBias:.84,breakBias:.16},

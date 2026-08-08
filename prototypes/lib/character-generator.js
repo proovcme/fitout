@@ -11,6 +11,8 @@ export const ROLE_PRESETS={
   electrician:{label:'Электрик',accent:'#3f88d4',speed:.98,discipline:68},
   designer:{label:'Проектировщик',accent:'#8e6cc7',speed:.9,discipline:83},
   architect:{label:'Архитектор',accent:'#7b5a78',speed:.92,discipline:80},
+  gip:{label:'ГИП',accent:'#22737b',speed:.92,discipline:90},
+  gap:{label:'ГАП',accent:'#7e243d',speed:.9,discipline:88},
   plumber:{label:'Сантехник',accent:'#3da89a',speed:.98,discipline:67},
   inspector:{label:'Технадзор',accent:'#b26155',speed:.9,discipline:86},
   engineer:{label:'Инженер ПТО',accent:'#6c8d9a',speed:.92,discipline:81},
