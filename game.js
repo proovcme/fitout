@@ -415,12 +415,12 @@ function renderMainMenu() {
     $('#continueSummary').textContent=`В портфеле ${liveProjects.length} ${liveProjects.length===1?'объект':'объекта'}. Активный: ${active.summary.title}, готовность ${active.summary.progress}%, прогноз ${active.summary.forecastProfit>=0?'+':''}${money(active.summary.forecastProfit)}.`;
     $('#nextActionTitle').textContent=`Поход: ${active.summary.title}`;
     $('#nextActionHint').textContent=`Приключение ждёт решения: готовность ${active.summary.progress}%. Вернитесь на площадку и продолжите день.`;
-    continueButton.dataset.menuIntent='continue';continueButton.querySelector('b').textContent='Вернуться в приключение';continueButton.querySelector('small').textContent='Продолжить текущий день';
+    continueButton.dataset.menuIntent='chapter';continueButton.querySelector('b').textContent='Вернуться на стройку';continueButton.querySelector('small').textContent='Глава 1 · ходить, говорить и вмешиваться';
   } else {
     $('#continueSummary').textContent='У компании пока нет объекта. Это не спокойствие — это отсутствие выручки.';
     $('#nextActionTitle').textContent='Первый поход: переговорная';
     $('#nextActionHint').textContent='Один объект, одна команда и ровно столько хаоса, чтобы запомнить. Великие империи редко начинаются с приличной мебели.';
-    continueButton.dataset.menuIntent='market';continueButton.querySelector('b').textContent='Начать первое приключение';continueButton.querySelector('small').textContent='Открыть доску заказов';
+    continueButton.dataset.menuIntent='chapter';continueButton.querySelector('b').textContent='Начать первое приключение';continueButton.querySelector('small').textContent='Войти на объект без таблиц';
   }
   headquarters.hidden=!headquartersOpen;
   const roleTitle=(roleId)=>COMPANY_ROLES.find(role=>role.id===roleId)?.title??'Специалист';
@@ -3162,8 +3162,7 @@ function openHeadquarters(tab='portfolio'){
   window.requestAnimationFrame(()=>$('#companyConsole')?.scrollIntoView({block:'start',behavior:'smooth'}));
 }
 $('#continueGameButton').addEventListener('click',()=>{
-  if($('#continueGameButton').dataset.menuIntent==='market'){startFirstAdventure();return;}
-  if(saved||state.portfolio?.projects?.length)resumePlayerGame();
+  window.location.href='./prototypes/fitout-chapter-one.html';
 });
 $('#openMarketButton').addEventListener('click',()=>{
   if(tutorialRequired()){startFirstAdventure();return;}

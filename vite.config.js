@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'node:path';
 
 export default defineConfig({
   // Relative assets let the same release live at les.ovc.me/fg/ and at the
@@ -14,5 +15,11 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 750,
+    rollupOptions: {
+      input: {
+        main: resolve(import.meta.dirname, 'index.html'),
+        chapterOne: resolve(import.meta.dirname, 'prototypes/fitout-chapter-one.html'),
+      },
+    },
   },
 });

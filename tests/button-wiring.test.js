@@ -129,14 +129,14 @@ test('career entry leads with one next action and keeps headquarters detail opt-
   assert.match(html,/id="openMarketButton"/);
   assert.match(html,/id="openHeadquartersButton"/);
   assert.match(script,/function openHeadquarters\(tab='portfolio'\)/);
-  assert.match(script,/continueButton\.dataset\.menuIntent='market'/);
+  assert.match(script,/continueButton\.dataset\.menuIntent='chapter'/);
 });
 
 test('a new career enters chapter one directly instead of detouring through the company spreadsheet',()=>{
   assert.match(html,/id="campScene" hidden/);
   assert.match(html,/id="openCompanyDeskButton"/);
   assert.match(script,/function startFirstAdventure\(\)/);
-  assert.match(script,/if\(\$\('#continueGameButton'\)\.dataset\.menuIntent==='market'\)\{startFirstAdventure\(\);return;\}/);
+  assert.match(script,/window\.location\.href='\.\/prototypes\/fitout-chapter-one\.html'/);
   assert.match(script,/if\(tutorialRequired\(\)\)\{startFirstAdventure\(\);return;\}/);
   assert.match(script,/syncActiveProjectToPortfolio\(state\);/);
 });
