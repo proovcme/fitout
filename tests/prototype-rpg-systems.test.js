@@ -19,6 +19,7 @@ import{generateAdventureSite,validateAdventureSite,ADVENTURE_SITE_TEMPLATES}from
 import{AdventureShift,SHIFT_FRONTS}from'../prototypes/lib/adventure-shift.js';
 import{PhysicalConstruction}from'../prototypes/lib/physical-construction.js';
 import{SiteAttention}from'../prototypes/lib/site-attention.js';
+import{depenetrate,moveWithCollisions,overlapsObstacle}from'../prototypes/lib/movement-collision.js';
 
 test('prototype character generator reproduces a worker from one seed',()=>{const a=generateCharacter('crew-42'),b=generateCharacter('crew-42'),c=generateCharacter('crew-43');assert.deepEqual(a,b);assert.notEqual(a.id,c.id);assert.match(a.name,/\s/);assert.equal(a.traits.length,2)});
 
@@ -51,6 +52,12 @@ test('helmet color communicates trade while accent customizes clothing',()=>{con
 test('available gender presentation follows real asset packs instead of profession logic',()=>{assert.deepEqual(availablePresentations('worker'),['masculine']);assert.deepEqual(availablePresentations('electrician'),['masculine','feminine']);const beard=generateCharacter('worker-a',{role:'worker'}),clean=generateCharacter('worker-b',{role:'worker'});assert.ok(['drafted_builder_v1','drafted_worker_clean_v1'].includes(beard.appearance.packId));assert.ok(['drafted_builder_v1','drafted_worker_clean_v1'].includes(clean.appearance.packId));assert.equal(generateCharacter('boss',{role:'project_manager'}).appearance.packId,'drafted_project_manager_v1')});
 
 test('navigation grid routes around a blocked wall and returns reachable targets',()=>{const grid=new NavigationGrid({minX:0,maxX:4,minZ:0,maxZ:4,cellSize:1,blocked:[{x:2,z:1.5,width:1,depth:3,padding:0}]});const path=grid.findPath({x:0,z:0},{x:4,z:0});assert.ok(path.length>5);assert.equal(path.some(point=>point.x===2&&point.z<=3),false);assert.equal(grid.reachable({x:0,z:0},[{x:4,z:0}]).length,1)});
+
+test('bot navigation can replace demolished walls with newly built geometry',()=>{const grid=new NavigationGrid({minX:0,maxX:4,minZ:0,maxZ:4,cellSize:1,blocked:[{x:2,z:1.5,width:1,depth:3,padding:0}]});const around=grid.findPath({x:0,z:1},{x:4,z:1});assert.ok(around.length>5);grid.setBlockedRects([]);const direct=grid.findPath({x:0,z:1},{x:4,z:1});assert.equal(direct.length,5);grid.setBlockedRects([{x:2,z:1,width:1,depth:1,padding:0}]);assert.ok(grid.findPath({x:0,z:1},{x:4,z:1}).length>direct.length)});
+
+test('actor collision slides along walls and can always move away after contact',()=>{const walls=[{x:1,z:0,width:.2,depth:4}],hit=moveWithCollisions({x:.55,z:0},{x:.8,z:.7},walls,{radius:.3});assert.ok(hit.blockedX);assert.ok(hit.z>.6);assert.ok(hit.x<.61);const away=moveWithCollisions(hit,{x:-.5,z:0},walls,{radius:.3});assert.ok(away.x<hit.x-.45);assert.equal(overlapsObstacle(away,walls,.3),false)});
+
+test('actors already intersecting geometry are pushed back to a walkable side',()=>{const walls=[{x:0,z:0,width:.3,depth:3}],fixed=depenetrate({x:0,z:.4},walls,.25);assert.equal(overlapsObstacle(fixed,walls,.25),false);assert.ok(Math.abs(fixed.x)>.39)});
 
 test('bot brain selects only work allowed to its class and follows the generated path',()=>{const grid=new NavigationGrid({minX:0,maxX:4,minZ:0,maxZ:4,cellSize:.5}),profile=generateCharacter('architect-bot',{role:'architect'}),actor={position:{x:0,y:0,z:0},direction:'front'},points=[{id:'wall',workId:'drill_wall',position:{x:1,z:0},station:{kind:'wall',object:{visible:true}}},{id:'desk',workId:'drawings',position:{x:3,z:0},duration:1,station:{kind:'desk',object:{visible:true}}}],brain=new CharacterBrain({profile,actor,navigation:grid,workPoints:points});assert.equal(brain.target.workId,'drawings');for(let i=0;i<300;i++)brain.update(1/60);assert.notEqual(brain.target?.workId,'drill_wall')});
 
