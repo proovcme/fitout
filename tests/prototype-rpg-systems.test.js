@@ -3,6 +3,7 @@ import assert from'node:assert/strict';
 import{readFileSync}from'node:fs';
 import*as THREE from'three';
 import{generateCharacter,frameRect,anchoredFrameDestination,animationBlend}from'../prototypes/lib/character-generator.js';
+import{HeroLocomotion,resolveHeroDirection}from'../prototypes/lib/hero-locomotion.js';
 import{ANIMATION_MANIFEST,APPEARANCE_PACKS,availablePresentations,validateAnimationManifest,validateCharacterDefinition,makeCharacterDefinition}from'../prototypes/lib/character-appearance.js';
 import{GameState}from'../prototypes/lib/gameplay-systems.js';
 import{ContextActions}from'../prototypes/lib/context-actions.js';
@@ -30,6 +31,10 @@ test('sprite frames keep their feet anchor instead of crawling sideways',()=>{co
 test('npc direction is resolved in camera space like the player direction',()=>{const resolve=createScreenDirectionResolver({x:-.6,z:.8},{x:-.8,z:-.6});assert.equal(resolve(-.8,-.6),'right');assert.equal(resolve(.8,.6),'left');assert.equal(resolve(.6,-.8),'front');assert.equal(resolve(-.6,.8),'back')});
 
 test('character atlas exposes eight walk frames and four work frames',()=>{const profile=generateCharacter('eight-frames',{role:'foreman'}),walk=new Set(),work=new Set();for(let time=0;time<1.2;time+=.14)walk.add(frameRect('walk','front',time,1600,800,profile).frame);for(let time=0;time<1;time+=.22)work.add(frameRect('drill','front',time,1024,1536,profile).frame);assert.equal(profile.animation.frames.walk,8);assert.equal(walk.size,8);assert.equal(work.size,4);assert.equal(frameRect('idle','back',0,1200,1200,profile).height,300)});
+
+test('hero locomotion resolves eight directions and preserves a twelve-phase stride',()=>{assert.equal(resolveHeroDirection(1,0),'right');assert.equal(resolveHeroDirection(1,-1),'frontRight');assert.equal(resolveHeroDirection(-1,1),'backLeft');const locomotion=new HeroLocomotion();let sample;for(let i=0;i<30;i++)sample=locomotion.update(1/60,{speed:2.65,maxSpeed:2.65,direction:'frontRight'});assert.equal(sample.direction,'frontRight');assert.ok(['start','walk'].includes(sample.state));assert.ok(sample.sample12>=0&&sample.sample12<12);const stopping=locomotion.update(1/60,{speed:0,direction:'frontRight'});assert.equal(stopping.state,'stop')});
+
+test('project manager owns a diagonal walk atlas and diagonal rows stay distinct',()=>{const profile=generateCharacter('hero-diagonal',{role:'project_manager'});assert.match(profile.atlases.walkDiagonal,/project-manager-walk-diagonal-atlas-v2\.png$/);assert.equal(frameRect('walk','frontLeft',0,1536,1024,profile).y,256);assert.equal(frameRect('walk','frontRight',0,1536,1024,profile).y,256);assert.equal(frameRect('walk','backRight',0,1536,1024,profile).y,768)});
 
 test('sprite animation blend math remains available for non-transparent previews',()=>{const profile=generateCharacter('blend-frames',{role:'project_manager'}),blend=animationBlend('walk','front',.075,1600,800,profile);assert.notEqual(blend.current.frame,blend.next.frame);assert.ok(blend.mix>0&&blend.mix<1);assert.equal(animationBlend('walk','front',0,1600,800,profile).mix,0)});
 

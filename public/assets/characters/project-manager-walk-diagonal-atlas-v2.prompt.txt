@@ -1,0 +1,20 @@
+Generated with the built-in image generation tool on 2026-08-08.
+
+Reference:
+project-manager-walk-atlas-v1-key.png
+
+Purpose:
+Four-row, eight-frame diagonal walk atlas for the project-manager hero in the
+2.5D isometric construction scene. The production renderer uses the two clean
+three-quarter rows and mirrors them for symmetric left/right directions.
+
+Prompt summary:
+Preserve the exact project-manager identity, lime helmet with black stripe,
+black work suit, white shirt, brown boots, lime armband, drawing roll and black
+folder. Draw coherent eight-frame three-quarter walk cycles on a flat #00ff00
+chroma-key background with consistent scale and feet baseline. Avoid text,
+shadows, extra limbs, cropping and costume drift.
+
+Production alpha extraction:
+remove_chroma_key.py --auto-key border --soft-matte
+  --transparent-threshold 12 --opaque-threshold 220 --despill
