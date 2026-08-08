@@ -48,6 +48,12 @@ export function createPersonProfile(role, seed = 1, index = 0) {
     accessory: Math.floor(value / 13) % 6,
     helmetVariant: Math.floor(value / 17) % 4,
     bubbleVariant: Math.floor(value / 23) % 12,
+    faceVariant: Math.floor(value / 29) % 5,
+    hairStyle: Math.floor(value / 37) % 6,
+    glasses: Math.floor(value / 41) % 5 === 0,
+    beard: Math.floor(value / 43) % 4 === 0,
+    uniformPattern: Math.floor(value / 47) % 5,
+    toolVariant: Math.floor(value / 53) % 6,
   };
 }
 

@@ -276,7 +276,13 @@ export function ensureWorkforceMarket(state) {
 
 export function ensureRuntimeCrews(state){
   const taskSkills={move:'general','demo-partitions':'construction','demo-equipment':'engineering','demo-floor':'paint','demo-ceiling':'paint'};
-  for(const task of state.tasks??[])if(taskSkills[task.id])task.skill=taskSkills[task.id];
+  for(const task of state.tasks??[]){
+    if(taskSkills[task.id])task.skill=taskSkills[task.id];
+    if(['demo-partitions','demo-equipment','demo-ceiling'].includes(task.id)){
+      task.deps=(task.deps??[]).filter(id=>id!=='temporary-networks');
+      task.hardDeps=(task.hardDeps??[]).filter(id=>id!=='temporary-networks');
+    }
+  }
   for(const contractor of state.contractors??[]){if(contractor.skill==='moving')Object.assign(contractor,{skill:'general',name:'Подсобные работы'});if(contractor.skill==='demolition')Object.assign(contractor,{skill:'construction',name:'Общестрой и демонтаж'});}
   for(const contractor of state.contractors?.filter(item=>item.hired)??[]){
     contractor.settlementDue??=0;
@@ -518,6 +524,10 @@ export function selectOrder(state, order) {
     deadlineHours: order.deadlineHours,
     qualityTarget: order.qualityTarget,
     cardsPlayed: [],
+    proposalBudgetPct:100,
+    proposalDeadlinePct:100,
+    negotiationAttempts:0,
+    negotiated:false,
   };
   const advance=Math.round(order.budget*.45);
   state.budget = advance;
@@ -578,6 +588,41 @@ export function applyContractCard(state,card) {
   state.contract.cardsPlayed.push(card.id);
   state.contract.budget+=card.budget??0;state.contract.deadlineHours+=card.deadline??0;state.contract.qualityTarget+=card.quality??0;state.trust+=card.trust??0;
   if(card.budget){state.budget+=card.budget;ensureProjectFinance(state).contractValue+=card.budget;recordCash(state,'income','Резерв',card.budget,card.title,{clientPayment:true});}return true;
+}
+
+export function contractNegotiationChance(state){
+  const contract=state.contract??{};const organization=ensureOrganization(state);
+  if(state.selectedOrder?.fixedContract)return 1;
+  if(state.selectedOrder?.tutorial)return 1;
+  const budgetPct=contract.proposalBudgetPct??100;const deadlinePct=contract.proposalDeadlinePct??100;
+  const experience=(organization.playerLevel??1)*.065+((organization.reputation??50)-50)*.004;
+  const retry=(contract.negotiationAttempts??0)*.055;
+  const budgetPressure=Math.max(0,budgetPct-100)*.012-Math.max(0,100-budgetPct)*.006;
+  const timePressure=Math.max(0,100-deadlinePct)*.014-Math.max(0,deadlinePct-100)*.005;
+  return THREELESS_CLAMP(.5+experience+retry-budgetPressure-timePressure,.12,.96);
+}
+
+export function resolveContractNegotiation(state,rng=Math.random){
+  if(!state.contract||state.contract.cardsPlayed.length!==2)return {ok:false,reason:'cards'};
+  if(state.contract.negotiated)return {ok:true,accepted:true,chance:1};
+  const chance=contractNegotiationChance(state);state.contract.negotiationAttempts=(state.contract.negotiationAttempts??0)+1;
+  if(rng()>=chance){
+    state.trust=Math.max(0,state.trust-2);
+    state.log.push({type:'risk',text:'Заказчик отклонил условия. Назвал их смелыми и переслал закупкам без комментария.'});
+    return {ok:true,accepted:false,chance};
+  }
+  const previousBudget=state.contract.budget;
+  const previousDeadline=state.contract.deadlineHours;
+  state.contract.budget=Math.max(1,Math.round(previousBudget*(state.contract.proposalBudgetPct??100)/100));
+  state.contract.deadlineHours=Math.max(9,Math.round(previousDeadline*(state.contract.proposalDeadlinePct??100)/100));
+  state.contract.negotiated=true;
+  const budgetDelta=state.contract.budget-previousBudget;
+  const advanceDelta=Math.round(budgetDelta*.45);
+  const finance=ensureProjectFinance(state);finance.contractValue+=budgetDelta;
+  if(advanceDelta>0){state.budget+=advanceDelta;recordCash(state,'income','Заказчик',advanceDelta,'Доплата аванса по согласованным условиям',{clientPayment:true});}
+  if(advanceDelta<0){state.budget+=advanceDelta;recordCash(state,'expense','Возврат аванса',Math.abs(advanceDelta),'Скидка по согласованным условиям');}
+  state.log.push({type:'done',text:`Условия согласованы: ${state.contract.budget}К и ${state.contract.deadlineHours} ч. Король генподряда временно коронован.`});
+  return {ok:true,accepted:true,chance,budgetDelta,advanceDelta,deadlineDelta:state.contract.deadlineHours-previousDeadline};
 }
 
 function recordCash(state,type,category,amount,text,{clientPayment=false}={}) {
@@ -735,7 +780,8 @@ export function unhireTeamMember(state,memberId) {
 
 export function unhireContractor(state,contractorId) {
   const contractor=state.contractors.find(item=>item.id===contractorId);if(!contractor?.hired||state.started)return {ok:false,reason:'locked'};
-  contractor.hired=false;refundProjectAndCompany(state,contractor.payment);contractor.payment=null;state.crews=state.crews.filter(crew=>crew.id!==`crew-${contractor.id}`);
+  const crewId=`crew-${contractor.id}`;contractor.hired=false;refundProjectAndCompany(state,contractor.payment);contractor.payment=null;state.crews=state.crews.filter(crew=>crew.id!==crewId);
+  for(const task of state.tasks??[])if(task.plannedCrewId===crewId){task.plannedCrewId=null;task.supervisorEmployeeId=null;}
   return {ok:true,contractor};
 }
 
@@ -796,12 +842,13 @@ export function forceAssignCrew(state,crewId,taskId) {
 export function taskCrewAvailability(state,taskOrId) {
   const task=typeof taskOrId==='string'?state.tasks.find(item=>item.id===taskOrId):taskOrId;
   if(!task)return {matching:[],present:[],free:[],away:[],nextArrival:null};
-  const matching=(state.crews??[]).filter(crew=>crew.skill===task.skill||crew.skill==='general');
+  const allCrews=state.crews??[];
+  const matching=task.plannedCrewId?allCrews.filter(crew=>crew.id===task.plannedCrewId):allCrews.filter(crew=>crew.skill===task.skill||crew.skill==='general');
   const present=matching.filter(crew=>(crew.unavailableUntil??0)<=state.elapsed);
   const free=present.filter(crew=>!crew.taskId);
   const away=matching.filter(crew=>(crew.unavailableUntil??0)>state.elapsed);
   const nextArrival=away.length?Math.min(...away.map(crew=>crew.unavailableUntil)):null;
-  return {matching,present,free,away,nextArrival};
+  return {matching,present,free,away,nextArrival,plannedMissing:Boolean(task.plannedCrewId&&!matching.length)};
 }
 
 export function startTaskNow(state,taskId) {
@@ -876,7 +923,8 @@ export function skipOptionalTask(state,taskId){
 function availableTaskForCrew(state, crew) {
   if ((crew.unavailableUntil ?? 0) > state.elapsed) return undefined;
   return state.tasks
-    .filter((task) => task.status === 'ready' && (task.skill === crew.skill||crew.skill==='general') && task.enabledToday)
+    .filter((task) => task.status === 'ready' && (task.plannedCrewId===crew.id||task.skill === crew.skill||crew.skill==='general') && task.enabledToday)
+    .filter(task=>!task.plannedCrewId||task.plannedCrewId===crew.id)
     .filter(task=>{
       if(crew.skill!=='general')return true;
       const freeExact=state.crews.filter(other=>other.skill===task.skill&&!other.taskId&&(other.unavailableUntil??0)<=state.elapsed).sort((a,b)=>(b.speed??0)-(a.speed??0)||a.id.localeCompare(b.id));
@@ -939,6 +987,24 @@ export function crewHeadcount(state,crew){
 }
 
 function THREELESS_CLAMP(value,min,max){return Math.max(min,Math.min(max,value));}
+
+export function taskControlFactor(state,task,crew){
+  if(!crew?.id?.startsWith('crew-'))return {factor:1,label:'Свой ресурс',load:0,employee:null};
+  const contractor=state.contractors?.find(item=>`crew-${item.id}`===crew.id);
+  const contractorLevel=Math.max(1,Math.min(5,contractor?.level??crew.level??1));
+  const employee=state.staff?.employees?.find(item=>item.id===task?.supervisorEmployeeId&&item.status==='employed');
+  const activeProjectId=state.portfolio?.activeProjectId;
+  const assignedHere=employee&&(!activeProjectId||employee.assignedProjectId===activeProjectId);
+  if(!assignedHere){
+    const factor=THREELESS_CLAMP(.68+contractorLevel*.06,.72,.98);
+    return {factor,label:`Без контроля · подрядчик ур. ${contractorLevel}`,load:0,employee:null};
+  }
+  const overlaps=(left,right)=>(left.plannedStartDay??0)<=(right.plannedFinishDay??0)&&(right.plannedStartDay??0)<=(left.plannedFinishDay??0);
+  const supervised=(state.tasks??[]).filter(item=>item.supervisorEmployeeId===employee.id&&!['done','skipped'].includes(item.status)&&overlaps(task,item));
+  const load=Math.max(1,supervised.length);
+  const factor=THREELESS_CLAMP(.88+(employee.competence??50)*.0014+(employee.discipline??50)*.0007-(load-1)*.08,.76,1.1);
+  return {factor,label:`${employee.name} · ${load>1?`нагрузка ×${load}`:'личный контроль'}`,load,employee};
+}
 
 function localCrowdingPenalty(state,task){
   const neighbors=state.tasks.filter(other=>other.id!==task.id&&other.status==='active'&&Math.hypot((other.x??0)-(task.x??0),(other.y??0)-(task.y??0))<2.15).length;
@@ -1055,7 +1121,28 @@ export function tryMagicResolve(state,rng=Math.random){
   if(remaining>0)return {ok:false,reason:'cooldown',remaining};
   state.magicResolve.lastAt=elapsed;state.magicResolve.attempts+=1;
   const chance=.16;
-  if(rng()>=chance){state.trust=Math.max(0,state.trust-1);state.log.push({type:'risk',text:'«Я в пути!» отправлено. В пути оказался только ответ «принято». Без решения.'});return {ok:true,success:false,chance,cooldownHours};}
+  if(rng()>=chance){
+    const backlash=rng();
+    if(backlash<.36){
+      state.trust=Math.max(0,state.trust-1);
+      state.log.push({type:'risk',text:'Порешать не получилось. В ответ пришло «принято», которое не является решением.'});
+      return {ok:true,success:false,backlash:'nothing',chance,cooldownHours};
+    }
+    if(backlash<.64){
+      const amount=Math.max(20,Math.min(75,Math.round((state.contract?.budget??800)*.035/5)*5));
+      state.budget-=amount;recordCash(state,'expense','Последствия порешания',amount,'Срочная услуга человека, которого никто не просил');
+      state.trust=Math.max(0,state.trust-2);state.log.push({type:'risk',text:`Порешали на ${amount}К: появился новый посредник, а старая проблема осталась.`});
+      return {ok:true,success:false,backlash:'cost',amount,chance,cooldownHours};
+    }
+    if(backlash<.86){
+      const hours=5;state.productionDelayHours=(state.productionDelayHours??0)+hours;state.productionDelayReason='Последствия попытки порешать';state.productionDelayScope='all';
+      state.trust=Math.max(0,state.trust-2);state.log.push({type:'risk',text:`После звонка все решили дождаться уточнений. Объект встал ещё на ${hours} часов.`});
+      return {ok:true,success:false,backlash:'delay',hours,chance,cooldownHours};
+    }
+    state.quality=Math.max(0,state.quality-4);state.siteDirt=Math.min(100,(state.siteDirt??0)+12);state.trust=Math.max(0,state.trust-4);
+    state.log.push({type:'risk',text:'Порешали не с тем человеком: на площадке появился лишний демонтаж, мусор и четыре новых версии правды.'});
+    return {ok:true,success:false,backlash:'chaos',chance,cooldownHours};
+  }
   const outcome=rng();
   if(outcome<.44){
     const awaiting=state.tasks.filter(task=>task.status==='awaiting');
@@ -1079,15 +1166,95 @@ export function isEventRelevant(state,event) {
   return state.tasks.some(task=>task.skill===requiredSkill&&(task.status==='active'||task.enabledToday||task.progress>0));
 }
 
+function eventTheme(event){
+  const haystack=`${event?.id??''} ${event?.title??''} ${event?.text??''}`.toLowerCase();
+  const themes=[];
+  if(/client|заказчик|ceo|budget|допработ|оплат|финанс|банкрот/.test(haystack))themes.push('client');
+  if(/crew|бригад|рабоч|прораб|миграц|персонал|начальств/.test(haystack))themes.push('people');
+  if(/постав|достав|материал|склад|мебел/.test(haystack))themes.push('supply');
+  if(/инспект|силов|провер|документ|акт|бухгалтер/.test(haystack))themes.push('compliance');
+  const skill=eventRequiredSkill(event);if(skill)themes.push(skill);
+  return themes.length?themes:['site'];
+}
+
+function ensureChaosDirector(state){
+  state.chaosDirector??={chain:null,history:[],nextFollowupAt:0};
+  state.communicationHistory??=[];
+  return state.chaosDirector;
+}
+
+function eventScore(state,event,fallbackId){
+  if(!event||!isEventRelevant(state,event))return -1e9;
+  const director=ensureChaosDirector(state);const themes=eventTheme(event);
+  let score=(event.weight??5)+(event.id===fallbackId?3:0);
+  if(director.chain?.themes?.some(theme=>themes.includes(theme)))score+=12;
+  const activeSkills=new Set(state.tasks.filter(task=>task.status==='active').map(task=>task.skill));
+  if(themes.some(theme=>activeSkills.has(theme)))score+=7;
+  if(state.budget<Math.max(80,(state.contract?.budget??800)*.12)&&themes.includes('client'))score+=5;
+  if((state.siteDirt??0)>55&&(themes.includes('compliance')||themes.includes('site')))score+=4;
+  const recent=director.history.slice(-5);if(recent.includes(event.id))score-=20;
+  const salt=(state.visualSeed??17)+(state.situationCount??0)*13+event.id.length*7+Math.floor(state.elapsed*10);
+  return score+(Math.sin(salt)*.5+.5)*2.4;
+}
+
+function directedEventId(state,fallbackId){
+  const candidates=[...randomEventById.values()].filter(event=>(event.minHour??0)<=state.elapsed&&isEventRelevant(state,event));
+  if(!candidates.length)return fallbackId;
+  return candidates.sort((left,right)=>eventScore(state,right,fallbackId)-eventScore(state,left,fallbackId))[0]?.id??fallbackId;
+}
+
+export function eventDecisionChannel(event,option){
+  const deltas=option?.deltas??{};
+  const effect=String(option?.effect??'').toLowerCase();
+  if(option?.financial||deltas.budget||deltas.deadline||Math.abs(deltas.trust??0)>=5||/₽|тыс|бюджет|деньг|срок|довер/.test(effect))return 'email';
+  return 'chat';
+}
+
+export function getDayRhythm(state){
+  if(!state.started)return {id:'setup',label:'ПОДГОТОВКА',hint:'Договор → команда → материалы → график',progress:0};
+  if(state.completed)return {id:'closed',label:'ОБЪЕКТ СДАН',hint:'Финальная приёмка и расчёт завершены',progress:1};
+  if(state.needsReport)return {id:'report',label:'ВЕЧЕРНИЙ ОТЧЁТ',hint:'План-факт, график и платежи',progress:1};
+  const shift=Math.max(0,state.elapsed-(state.shiftStartedAt??Math.floor(state.elapsed/24)*24));
+  const progress=Math.max(0,Math.min(1,shift/9));
+  if(state.needsPlanning||state.paused&&state.phase==='planning')return {id:'plan',label:'ПЛАНЁРКА',hint:'Выберите главное ограничение дня',progress:0};
+  if(progress<.14)return {id:'launch',label:'ЗАПУСК СМЕНЫ',hint:'Люди занимают фронты, стройка набирает темп',progress};
+  if(progress<.43)return {id:'production',label:'ПРОИЗВОДСТВО',hint:'Смотрите, где план расходится с реальностью',progress};
+  if(progress<.76)return {id:'chaos',label:'ОПЕРАТИВНОЕ УПРАВЛЕНИЕ',hint:'Чат, почта и решения по отклонениям',progress};
+  return {id:'close',label:'ЗАКРЫТИЕ ДНЯ',hint:'Предъявите готовое и готовьте отчёт',progress};
+}
+
+export function getProjectCloseout(state){
+  const tasks=state.tasks??[];const payable=tasks.filter(task=>!task.reworkOf&&!['executive-docs','inspect'].includes(task.id)&&task.status!=='skipped');
+  const accepted=payable.filter(task=>task.status==='done').length;
+  const awaiting=tasks.filter(task=>task.status==='awaiting').length;
+  const unfinished=tasks.filter(task=>!['done','skipped'].includes(task.status)).length;
+  const docs=tasks.find(task=>task.id==='executive-docs');
+  const inspection=tasks.find(task=>task.id==='inspect');
+  const finance=ensureProjectFinance(state);
+  const finalDue=Math.max(0,Math.round((finance.contractValue??state.contract?.budget??0)-(finance.received??0)));
+  let status='build',title='Строим и предъявляем',hint=`Принято ${accepted} из ${payable.length} оплачиваемых этапов`;
+  if(awaiting){status='acceptance';title=`На предъявление: ${awaiting}`;hint='Работа сделана физически, но деньги ещё у заказчика';}
+  if(!unfinished&&!state.completed){status='settlement';title='Финальное закрытие';hint=finalDue?`После ИД и приёмки придёт ${finalDue}К ₽`:'Все договорные платежи уже получены';}
+  else if(state.sitePhysicallyComplete&&docs?.status!=='done'){status='docs';title='Стройка готова, деньги — нет';hint=`Сдайте ИД, чтобы разблокировать ${finalDue}К ₽`;}
+  else if(docs?.status==='done'&&inspection?.status!=='done'){status='inspection';title='Осталась финальная приёмка';hint=`Заказчик удерживает ${finalDue}К ₽ до осмотра`;}
+  if(state.completed){status='closed';title='Объект принят и закрыт';hint=`Получено ${Math.round(finance.received??0)}К ₽ по договору`;}
+  return {status,title,hint,accepted,total:payable.length,awaiting,unfinished,docsDone:docs?.status==='done',inspectionDone:inspection?.status==='done',finalDue,received:Math.round(finance.received??0),contractValue:Math.round(finance.contractValue??0)};
+}
+
 function queueTimedEvents(state) {
   if(state.tutorial?.active&&!state.tutorial.completed&&!state.tutorial.observedBuild)return;
+  const director=ensureChaosDirector(state);
   state.eventCountsByDay??={};
   const eventDay=Math.floor(state.elapsed/24);
   const slotsUsed=()=>state.eventCountsByDay[eventDay]??0;
   let queuedThisPass=false;
   state.nextMajorEventAt??=0;
   const shiftWarmupUntil=(state.shiftStartedAt??eventDay*24)+.75;
-  const queueMajor=(id)=>{if(slotsUsed()>=5||queuedThisPass||state.eventQueue.length||state.elapsed<state.nextMajorEventAt||state.elapsed<shiftWarmupUntil)return false;state.eventCountsByDay[eventDay]=slotsUsed()+1;state.eventQueue.push(id);state.paused=true;queuedThisPass=true;state.nextMajorEventAt=state.elapsed+1.35;return true;};
+  const queueMajor=(id)=>{if(slotsUsed()>=5||queuedThisPass||state.eventQueue.length||state.elapsed<state.nextMajorEventAt||state.elapsed<shiftWarmupUntil)return false;const directed=directedEventId(state,id);state.eventCountsByDay[eventDay]=slotsUsed()+1;state.eventQueue.push(directed);state.paused=true;queuedThisPass=true;state.nextMajorEventAt=state.elapsed+1.35;director.history.push(directed);director.history=director.history.slice(-12);state.communicationHistory.push({id:`incoming-${directed}-${state.elapsed}`,channel:'incoming',eventId:directed,text:randomEventById.get(directed)?.title??directed,at:state.elapsed});state.communicationHistory=state.communicationHistory.slice(-40);return true;};
+  if(director.chain&&state.elapsed>=director.nextFollowupAt&&slotsUsed()<5){
+    const chained=directedEventId(state,director.chain.originId);
+    if(queueMajor(chained)){director.chain.remaining-=1;director.nextFollowupAt=state.elapsed+2.2;if(director.chain.remaining<=0)director.chain=null;return;}
+  }
   const paintTask=state.tasks.find(task=>['paint','wall-finish'].includes(task.id));
   const prepTask=state.tasks.find(task=>['prep','protection','partitions'].includes(task.id));
   const paintIsCurrent=paintTask?.status==='active'||paintTask?.enabledToday||prepTask?.status==='done';
@@ -1109,11 +1276,12 @@ function queueTimedEvents(state) {
   }
 }
 
-function applyProductionTimeImpact(state,hours=0,reason='Событие') {
+function applyProductionTimeImpact(state,hours=0,reason='Событие',scope='all') {
   if(!hours)return;
   if(hours>0){
     state.productionDelayHours=(state.productionDelayHours??0)+hours;
     state.productionDelayReason=reason;
+    state.productionDelayScope=scope;
     return;
   }
   let credit=Math.abs(hours);
@@ -1206,13 +1374,14 @@ export function applyEventChoice(state, eventId, choiceId) {
 export function applyCatalogEventChoice(state, event, choiceId) {
   const option=event?.options?.find(item=>item.id===choiceId);
   if(!option) return false;
+  const director=ensureChaosDirector(state);const channel=eventDecisionChannel(event,option);
   const deltas=option.deltas??{};
   state.budget+=deltas.budget??0;
   if(option.financial==='client-extra'&&deltas.budget>0){state.contract.budget+=deltas.budget;if(state.finance)state.finance.contractValue=(state.finance.contractValue??0)+deltas.budget;}
   if(deltas.budget)recordCash(state,deltas.budget>0?'income':'expense',option.financial==='client-extra'?'Допфинансирование заказчика':'Событие',Math.abs(deltas.budget),event.title,{clientPayment:option.financial==='client-extra'&&deltas.budget>0});
   state.quality+=deltas.quality??0;
   state.trust+=deltas.trust??0;
-  applyProductionTimeImpact(state,deltas.time??0,event.title);
+  applyProductionTimeImpact(state,deltas.time??0,event.title,option.delayScope??'all');
   if(deltas.deadline)state.contract.deadlineHours=Math.max(9,state.contract.deadlineHours+deltas.deadline);
   const scene={...(option.scene??{})};
   const duration=Math.max(5,scene.hideHours??8);
@@ -1233,6 +1402,11 @@ export function applyCatalogEventChoice(state, event, choiceId) {
   state.eventQueue=state.eventQueue.filter(id=>id!==event.id);
   state.nextMajorEventAt=Math.max(state.nextMajorEventAt??0,state.elapsed+1.35);
   state.paused=false;
+  const themes=eventTheme(event);
+  director.chain={originId:event.id,themes,remaining:1,nextFollowupAt:state.elapsed+2.2};
+  director.nextFollowupAt=state.elapsed+2.2;
+  state.communicationHistory.push({id:`reply-${event.id}-${state.elapsed}`,channel,eventId:event.id,title:option.title,text:option.effect,consequence:{...deltas},at:state.elapsed});
+  state.communicationHistory=state.communicationHistory.slice(-40);
   state.log.push({type:'event',text:`Решение: ${option.title}`});
   return true;
 }
@@ -1262,12 +1436,15 @@ export function tickState(state, deltaHours) {
   const dayIndex=Math.floor(state.elapsed/24);
   if(dayIndex>state.plannedDay){state.needsPlanning=true;state.paused=true;state.speed=1;for(const task of state.tasks)task.enabledToday=false;return state;}
   let productiveHours=deltaHours;
+  const legacyPhysicalDelay=state.productionDelayScope==null&&String(state.productionDelayReason??'').includes('Миграционная служба');
+  const delayScope=legacyPhysicalDelay?'physical':(state.productionDelayScope??'all');
   if((state.productionDelayHours??0)>0){
     const consumed=Math.min(productiveHours,state.productionDelayHours);
     state.productionDelayHours=Math.max(0,state.productionDelayHours-consumed);
+    if(state.productionDelayHours<=1e-6)state.productionDelayScope=null;
     productiveHours-=consumed;
     updateAmbientActivity(state);
-    if(productiveHours<=0)return state;
+    if(productiveHours<=0&&delayScope==='all')return state;
   }
   state.smokeBreak=Math.floor(state.elapsed/8)%4===2;
   updateAmbientActivity(state);
@@ -1291,13 +1468,15 @@ export function tickState(state, deltaHours) {
   for (const task of state.tasks.filter((item) => item.status === 'active')) {
     const crew = state.crews.find((item) => item.id === task.crewId);
     if (!crew) continue;
+    const taskProductiveHours=delayScope==='physical'&&NON_PHYSICAL_TASKS.has(task.id)?deltaHours:productiveHours;
+    if(taskProductiveHours<=0)continue;
     const siteDiscipline=state.smokeBreak&&crew.id!=='foreman'?.82:1;
-    const teamControl=state.team?.find(member=>member.id==='pm')?.hired?1:.72;
+    const control=taskControlFactor(state,task,crew);task.controlFactor=control.factor;task.controlLabel=control.label;
     const occupiedPenalty=state.selectedOrder?.occupiedOffice?.82:1;const mismatchPenalty=task.profileMismatch?.55:1;const pressure=state.elapsed<(task.pressureUntil??0)?(task.pressureFactor??1):1;const playerPresence=state.playerZoneTaskId===task.id?1.18+bossArtifactBonus(state,'presence'):1;const crowdingPenalty=(state.siteCongestion?.penalty??1)*localCrowdingPenalty(state,task);
     const baseManpower=Math.max(1,crew.baseManpower??crewHeadcount(state,crew));const actualManpower=crewHeadcount(state,crew);const manpowerFactor=THREELESS_CLAMP(1+(actualManpower-baseManpower)*(actualManpower>=baseManpower?.06:.075),.65,1.3);
     const cleanupDistraction=task.skill==='cleaning'||NON_PHYSICAL_TASKS.has(task.id)?1:cleanliness.distraction*(state.skippedTempoFactor??1);
     const artifactSpeed=task.id==='survey'?1+bossArtifactBonus(state,'surveySpeed'):1;
-    task.progress += calculateProductionDelta({hours:productiveHours,duration:task.duration,speed:crew.speed*artifactSpeed,discipline:siteDiscipline,control:teamControl,occupancy:occupiedPenalty,mismatch:mismatchPenalty,pressure,presence:playerPresence,crowding:crowdingPenalty,manpower:manpowerFactor,cleanup:cleanupDistraction});
+    task.progress += calculateProductionDelta({hours:taskProductiveHours,duration:task.duration,speed:crew.speed*artifactSpeed,discipline:siteDiscipline,control:control.factor,occupancy:occupiedPenalty,mismatch:mismatchPenalty,pressure,presence:playerPresence,crowding:crowdingPenalty,manpower:manpowerFactor,cleanup:cleanupDistraction});
     if (task.progress >= 1) completeTask(state, task, crew);
   }
 

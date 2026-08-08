@@ -26,7 +26,7 @@
         <div class="clock-controls" aria-label="Скорость игры">
           <button class="top-menu-button" id="menuButton" type="button" title="Сохранить и выйти в меню" aria-label="Сохранить и выйти в меню"><span aria-hidden="true">☰</span><b>МЕНЮ</b></button>
           <button class="top-schedule-button" id="topScheduleButton" type="button" title="Общий график" aria-label="Открыть общий график">▦ <span>ГРАФИК</span></button>
-          <div class="profile-chip" id="profileChip" hidden><span id="profileName"></span><button id="logoutButton" title="Выйти из профиля">↗</button></div>
+          <div class="profile-chip" id="profileChip" hidden><span id="profileName"></span></div>
           <div class="game-clock">
             <span id="dayLabel">ПТ · ДЕНЬ 1</span>
             <strong id="timeLabel">09:00</strong>
@@ -89,7 +89,14 @@
         <section class="site-stage" aria-label="Игровое поле — офис">
           <canvas id="siteCanvas" aria-label="Изометрический план офиса"></canvas>
           <div class="site-topline">
-            <div class="live-chip"><i></i><span id="siteStatus">Объект принят</span></div>
+            <div class="site-rhythm">
+              <div class="live-chip"><i></i><span id="siteStatus">Объект принят</span></div>
+              <div class="rhythm-chip" id="rhythmChip" data-rhythm="setup">
+                <span id="rhythmLabel">ПОДГОТОВКА</span>
+                <small id="rhythmHint">Договор → команда → материалы → график</small>
+                <i><b id="rhythmProgress"></b></i>
+              </div>
+            </div>
             <div class="live-chip activity-chip" id="siteBeat" hidden aria-live="polite"><i></i><span id="siteBeatText">На объекте что-то происходит</span></div>
             <div class="view-actions">
               <button id="soundToggle" title="Звук" aria-label="Включить или выключить звук">♪</button>
@@ -100,6 +107,21 @@
               <button id="zoomIn" title="Увеличить" aria-label="Увеличить">+</button>
             </div>
           </div>
+          <button class="magic-site-button" id="magicResolveButton" type="button" title="Редкая попытка решить проблему связями. Может помочь, ничего не сделать или создать новую проблему.">
+            <span>✦</span>
+            <b>ПОРЕШАТЬ</b>
+            <small id="magicResolveStatus">ГОТОВО</small>
+          </button>
+          <button class="scene-action-card" id="sceneActionCard" type="button" hidden aria-live="polite" title="Показать активный фронт работ">
+            <span class="scene-action-icon" id="sceneActionIcon" aria-hidden="true">⚒</span>
+            <span class="scene-action-copy">
+              <small id="sceneActionKicker">СЕЙЧАС СТРОЯТ</small>
+              <strong id="sceneActionTitle">Работы на объекте</strong>
+              <span id="sceneActionCrew">Бригада выходит на фронт</span>
+              <i><b id="sceneActionProgress"></b></i>
+            </span>
+            <em id="sceneActionPercent">0%</em>
+          </button>
           <div class="room-legend" aria-hidden="true">
             <span><i class="work-dot"></i>Работа</span>
             <span><i class="crew-dot"></i>Бригада</span>
@@ -108,6 +130,16 @@
           <div class="selection-card" id="selectionCard" hidden></div>
           <div class="feedback-flash" id="feedbackFlash" aria-hidden="true"></div>
           <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+          <aside class="situation-interrupt" id="situationInterrupt" hidden aria-live="assertive">
+            <span class="situation-interrupt-siren">!</span>
+            <div>
+              <small>ПЛОЩАДКА ТРЕБУЕТ РЕШЕНИЯ</small>
+              <strong id="situationInterruptTitle">Что-то опять не по проекту</strong>
+              <p id="situationInterruptText">Прораб уже набирает сообщение со словом «срочно».</p>
+            </div>
+            <button class="situation-interrupt-answer" id="situationInterruptAnswer" type="button">Разобраться</button>
+            <button class="situation-interrupt-dismiss" data-dismiss-situation-interrupt type="button" aria-label="Отложить вопрос" title="Оставить вопрос в списке">×</button>
+          </aside>
         </section>
 
         <aside class="right-panel panel">
@@ -116,33 +148,35 @@
             <span class="online-dot" title="Объект на связи"></span>
           </div>
           <p class="panel-hint">После планёрки влиять на стройку можно сообщениями, письмами и через команду.</p>
+          <section class="closeout-card" id="closeoutCard" data-closeout="build">
+            <div><span class="eyebrow">ПРИЁМКА И ДЕНЬГИ</span><strong id="closeoutTitle">Строим и предъявляем</strong><small id="closeoutHint">Принято 0 этапов</small></div>
+            <b id="closeoutPayment">0 ₽</b>
+            <i><span id="closeoutProgress"></span></i>
+          </section>
           <nav class="management-menu" aria-label="Каналы управления объектом">
             <button class="management-card whatsapp" id="siteWhatsappButton" type="button"><span class="management-icon">◉</span><span><strong>Чат стройки</strong><small>Сделать срочно · уточнить статус</small></span><b>→</b></button>
             <button class="management-card outlook" id="siteEmailButton" type="button"><span class="management-icon">✉</span><span><strong>Почта</strong><small>Резерв · решение · претензия</small></span><b>→</b></button>
             <button class="management-card team" id="teamButton" type="button"><span class="management-icon">♟</span><span><strong>Команда</strong><small>Свои люди, подрядчики и переброска</small></span><b id="crewCount">2 на объекте →</b></button>
-            <button class="management-card magic" id="magicResolveButton" type="button"><span class="management-icon">✦</span><span><strong>Я в пути!</strong><small>Порешать · шанс 16% · раз в два дня</small></span><b id="magicResolveStatus">ГОТОВО</b></button>
             <div class="management-tools">
               <button id="financeButton" type="button"><span>₽</span>Деньги</button>
               <button id="docsButton" type="button"><span>▤</span>Документы</button>
               <button class="save-exit-button" id="saveExitButton" type="button"><span>↙</span>Сохранить и выйти в меню</button>
             </div>
           </nav>
-          <section class="situation-inbox" aria-labelledby="situationInboxTitle">
-            <div class="situation-inbox-heading">
+          <details class="ops-drawer situation-inbox" id="situationDrawer">
+            <summary class="situation-inbox-heading">
               <div><span class="eyebrow">ЖИВОЙ ОБЪЕКТ</span><h3 id="situationInboxTitle">Вопросы с площадки</h3></div>
-              <span class="counter" id="situationCount">0</span>
-            </div>
-            <p class="situation-inbox-empty" id="situationInboxEmpty">Пока никто не требует решить судьбу одной розетки.</p>
-            <div class="situation-inbox-list" id="situationInbox"></div>
-          </section>
-          <section class="site-contractor-roster" aria-labelledby="siteContractorRosterTitle">
-            <div class="situation-inbox-heading">
+              <span><b class="counter" id="situationCount">0</b><i>⌄</i></span>
+            </summary>
+            <div class="ops-drawer-body"><p class="situation-inbox-empty" id="situationInboxEmpty">Пока никто не требует решить судьбу одной розетки.</p><div class="situation-inbox-list" id="situationInbox"></div></div>
+          </details>
+          <details class="ops-drawer site-contractor-roster" id="contractorDrawer">
+            <summary class="situation-inbox-heading">
               <div><span class="eyebrow">ЛЮДИ И ДЕНЬГИ</span><h3 id="siteContractorRosterTitle">Подрядчики на объекте</h3></div>
-              <span class="counter" id="siteContractorCount">0</span>
-            </div>
-            <p class="panel-hint contractor-roster-hint">Бригада не уходит сама: ожидание тоже входит в ежедневное содержание. Снять её можно на вечернем закрытии.</p>
-            <div class="site-contractor-list" id="siteContractorRoster"></div>
-          </section>
+              <span><b class="counter" id="siteContractorCount">0</b><i>⌄</i></span>
+            </summary>
+            <div class="ops-drawer-body"><p class="panel-hint contractor-roster-hint">Здесь видно, кто работает, ждёт фронт или всё ещё выставляет счёт.</p><div class="site-contractor-list" id="siteContractorRoster"></div></div>
+          </details>
           <div class="contractor-list" id="contractorList" hidden></div>
           <div class="crew-list" id="crewList" hidden></div>
         </aside>
@@ -180,8 +214,10 @@
           <label>ИМЯ ИГРОКА<input id="authName" name="username" autocomplete="username" minlength="2" maxlength="28" placeholder="Например, Прораб_77" required></label>
           <label>ПАРОЛЬ<input id="authPassword" name="password" type="password" autocomplete="current-password" minlength="4" maxlength="72" placeholder="Не «1234», хотя мы не заказчик" required></label>
           <div class="auth-message" id="authMessage" aria-live="polite"></div>
-          <button class="primary-button hero-button" id="loginButton" type="submit">Войти и продолжить <span>→</span></button>
-          <button class="secondary-button auth-register" id="registerButton" type="button">Создать нового игрока</button>
+          <div class="auth-actions">
+            <button class="primary-button hero-button" id="loginButton" type="submit"><span><b>Продолжить карьеру</b><small>Я уже открывал этот офис</small></span><strong>→</strong></button>
+            <button class="auth-register" id="registerButton" type="button"><span><b>Создать игрока</b><small>Начать путь короля генподряда</small></span><strong>＋</strong></button>
+          </div>
           <small>Сохранения синхронизируются с VPS. В браузере остаётся резервная копия.</small>
         </form>
       </section>
@@ -212,29 +248,52 @@
           <div class="hq-scene-caption"><span>ВАШ ШТАБ · УРОВЕНЬ <b id="hqSceneLevel">0</b></span><strong id="hqSceneTitle">Стол у принтера</strong><small id="hqSceneStatus">Клиентам строим лучше, чем себе.</small></div>
         </div>
         <div class="main-menu-actions">
-          <span class="eyebrow">ПРОФИЛЬ <b id="menuProfileName">ИГРОК</b></span>
-          <h1 id="mainMenuTitle">Что строим сегодня?</h1>
-          <p id="continueSummary">Сохранённого объекта пока нет. Это самый спокойный момент вашей карьеры.</p>
-          <div class="main-menu-primary-actions">
-            <button class="primary-button menu-button" id="continueGameButton" type="button"><span><b>Продолжить</b><small>Вернуться в текущую компанию</small></span><strong>→</strong></button>
-            <button class="secondary-button menu-button danger-button" id="newGameButton" type="button"><span><b>Новая игра</b><small>Удалить карьеру и начать заново</small></span><strong>＋</strong></button>
-          </div>
+          <span class="eyebrow">БЦ «БАНКРОТ» · ЦОКОЛЬ · ПРОФИЛЬ <b id="menuProfileName">ИГРОК</b></span>
+          <h1 id="mainMenuTitle">Утро короля генподряда</h1>
+          <p id="continueSummary">У вас есть каска, принтер с полосой и люди, которым тоже некуда отступать. Этого достаточно для первой главы.</p>
+          <section class="command-deck" aria-label="Следующее действие">
+            <div class="command-hero">
+              <span>ВАШ СЛЕДУЮЩИЙ ПОХОД</span>
+              <strong id="nextActionTitle">Первый объект ждёт</strong>
+              <small id="nextActionHint">Переговорная к понедельнику. Она маленькая, но уже успела стать легендой в трёх чатах.</small>
+              <button class="primary-button menu-button" id="continueGameButton" type="button"><span><b>Взять первый объект</b><small>Глава 1 · без таблиц и героизма</small></span><strong>→</strong></button>
+            </div>
+            <div class="command-branches">
+              <button class="command-branch" id="openMarketButton" type="button"><i>⌖</i><span><b>Доска приключений</b><small>Следующие объекты откроются после первой главы</small></span><strong>→</strong></button>
+              <button class="command-branch" id="openHeadquartersButton" type="button"><i>♜</i><span><b>Собрать отряд</b><small>Кто пойдёт с вами и почему пока не сбежал</small></span><strong>↓</strong></button>
+            </div>
+            <section class="party-roster" aria-label="Ваш отряд">
+              <header><span>ВАШ ОТРЯД</span><b>КЛАССЫ, КОТОРЫЕ ЕЩЁ НЕ УШЛИ</b></header>
+              <div id="partyRoster"></div>
+            </section>
+          </section>
+          <section class="camp-scene" id="campScene" hidden aria-label="Цокольный штаб и отряд">
+            <span class="camp-scene-kicker">ПЕРЕД ПОХОДОМ</span>
+            <h2>Стол, принтер и четыре вида надежды</h2>
+            <p>Семён принёс рулетку, Алина — привычку отвечать за чужие обещания. Остальные пока существуют в виде номеров в телефоне. Это не штат. Это начало легенды, которую потом будет неудобно пересказывать бухгалтеру.</p>
+            <div class="camp-rules"><span><b>1</b> На первом объекте вы — капитан.</span><span><b>2</b> Бригады появятся, когда работа потребует их.</span><span><b>3</b> Любая стройка считает себя квестом.</span></div>
+            <button class="camp-admin-link" id="openCompanyDeskButton" type="button">Открыть скучные бумаги и настоящий штаб →</button>
+          </section>
           <section class="organization-card" aria-label="Экономика организации">
             <header><span><small>ВАША ОРГАНИЗАЦИЯ</small><strong id="organizationName">ООО «Потом согласуем»</strong></span><b id="organizationCash">320 000 ₽</b></header>
             <div class="organization-metrics"><span><small>УРОВЕНЬ</small><b id="organizationLevel">1</b></span><span><small>ДОЛГ</small><b id="organizationDebt">0 ₽</b></span><span><small>ПРОЕКТЫ</small><b id="organizationProjects">0</b></span><span><small>РЕПУТАЦИЯ</small><b id="organizationReputation">50</b></span></div>
           </section>
-          <section class="company-console" aria-label="Управление компанией">
-            <header class="company-console-head"><span><small>ЕДИНЫЙ ДЕНЬ КОМПАНИИ</small><strong id="companyDayLabel">День 1 · портфель на паузе</strong></span><b id="companyAlertCount" title="События компании или объектов, которые требуют решения игрока">Критичные вопросы: 0</b></header>
+          <section class="company-console" id="companyConsole" aria-label="Управление компанией" hidden>
+            <header class="company-console-head"><span><small>ШТАБ КОМПАНИИ</small><strong id="companyDayLabel">День 1 · портфель на паузе</strong></span><b id="companyAlertCount" title="События компании или объектов, которые требуют решения игрока">Критичные вопросы: 0</b><button class="company-console-back" id="closeHeadquartersButton" type="button">← К выбору дня</button></header>
             <div class="company-workspace">
               <nav class="company-tabs" aria-label="Разделы штаба">
                 <button type="button" class="active" data-company-tab="portfolio"><i>▦</i><span><b>Объекты</b><small>Статус и решения</small></span></button>
                 <button type="button" data-company-tab="staff"><i>♟</i><span><b>Штат</b><small>Люди и назначения</small></span></button>
                 <button type="button" data-company-tab="finance"><i>₽</i><span><b>Деньги</b><small>Касса и обязательства</small></span></button>
-                <button type="button" data-company-tab="market"><i>⌖</i><span><b>Рынок компании</b><small>Объекты, штат, аутсорс</small></span></button>
-                <button type="button" data-company-tab="contractors"><i>⚒</i><span><b>Подрядчики</b><small>Проверенная сеть</small></span></button>
+                <button type="button" data-company-tab="market"><i>⌖</i><span><b>Найти</b><small>Заказ, сотрудника или услугу</small></span></button>
+                <button type="button" data-company-tab="contractors"><i>⚒</i><span><b>Бригады</b><small>Строительные подрядчики</small></span></button>
                 <button type="button" data-company-tab="office"><i>⌂</i><span><b>Свой офис</b><small>Штаб и внешний вид</small></span></button>
               </nav>
               <div class="company-console-body">
+                <nav class="office-subtabs" id="officeSubtabs" aria-label="Разделы собственного офиса" hidden>
+                  <button type="button" class="active" data-office-section="development"><span>⌂</span><b>Оснащение штаба</b><small>Расширение и постоянные бонусы</small></button>
+                  <button type="button" data-office-section="boss"><span>♛</span><b>Кабинет руководителя</b><small>Аватар и артефакты</small></button>
+                </nav>
                 <div class="company-console-content" id="companyConsoleContent"></div>
                 <section class="hq-menu-card" id="hqMenuCard" aria-label="Собственный офис" hidden>
                   <span><small>СОБСТВЕННЫЙ ОФИС · УРОВЕНЬ <b id="hqLevel">0</b></small><strong id="hqTitle">Стол у принтера</strong><em id="hqStatus">Клиентам строим лучше, чем себе.</em></span>
@@ -245,7 +304,9 @@
               </div>
             </div>
           </section>
+          <button class="menu-reset-link danger-button" id="newGameButton" type="button">Начать новую карьеру</button>
           <nav class="source-links" aria-label="Материалы об офисах"><a href="https://www.youtube.com/@Olsedmi" target="_blank" rel="noreferrer">▶ YouTube · Офисная среда</a><a href="https://t.me/all_about_offices" target="_blank" rel="noreferrer">➤ Telegram · Всё об офисах</a></nav>
+          <button class="switch-player-button" id="logoutButton" type="button">Сменить игрока</button>
           <small>Прогресс сохраняется автоматически в вашем профиле.</small>
         </div>
       </section>
@@ -303,7 +364,13 @@
             <li><i>3</i> Реагируйте на события заказчика</li>
           </ul>
           <div class="negotiation-panel" id="negotiationPanel">
-            <div class="subheading"><span>ВАШ ХОД · СЫГРАЙТЕ 2 КАРТЫ</span><strong id="cardsPlayed">0 / 2</strong></div>
+            <div class="subheading"><span>УСЛОВИЯ ГЕНПОДРЯДЧИКА</span><strong id="negotiationChance">ШАНС 50%</strong></div>
+            <div class="contract-sliders">
+              <label><span><b>Цена договора</b><strong id="budgetAskLabel">100%</strong></span><input id="budgetAsk" data-contract-slider="budget" type="range" min="90" max="125" step="1" value="100"></label>
+              <label><span><b>Срок выполнения</b><strong id="deadlineAskLabel">100%</strong></span><input id="deadlineAsk" data-contract-slider="deadline" type="range" min="75" max="140" step="1" value="100"></label>
+            </div>
+            <p class="negotiation-explain" id="negotiationExplain">Просите больше денег или меньше времени — заказчик сопротивляется. Уровень компании и репутация помогают сопротивляться заказчику.</p>
+            <div class="subheading"><span>АРГУМЕНТЫ · СЫГРАЙТЕ 2 КАРТЫ</span><strong id="cardsPlayed">0 / 2</strong></div>
             <div class="contract-deck" id="contractDeck"></div>
           </div>
           <button class="primary-button hero-button" id="startMission" disabled>Сначала договоритесь <span>→</span></button>
@@ -315,29 +382,38 @@
     <div class="modal-backdrop" id="marketModal" role="dialog" aria-modal="true" aria-labelledby="marketTitle">
       <section class="market-modal">
         <button class="modal-close" id="closePreparation" aria-label="Закрыть подготовку и вернуться в штаб">×</button>
-        <div class="market-map">
-          <span class="eyebrow">ПОДГОТОВКА ОБЪЕКТА</span>
-          <h2 id="marketTitle">Соберите контур управления</h2>
-          <p>Подрядчики дают руки. Собственная команда даёт им порядок, контроль и память.</p>
-          <div class="map-grid" id="mapGrid"></div>
+        <div class="market-map prep-project-screen">
+          <span class="eyebrow">РЕСУРСНЫЙ ПЛАН ОБЪЕКТА</span>
+          <h2 id="marketTitle">Кто, что и когда строит</h2>
+          <p>Задача и срок образуют график. Ответственный — ваш сотрудник. Ресурс — подрядчик или собственная бригада, которая физически выполняет работу.</p>
+          <section class="prep-resource-plan prep-project-plan">
+            <header><span><small>ГРАФИК ПРОИЗВОДСТВА РАБОТ</small><strong>План до первого звонка заказчика</strong></span><p>Сдвигайте сроки, назначайте ответственных и закрепляйте ресурсы. Пересечение одной бригады на двух фронтах подсвечивается как конфликт.</p></header>
+            <div id="prepResourcePlan"></div>
+          </section>
         </div>
         <div class="market-roster">
           <section class="prep-gates" aria-label="Чек-лист запуска объекта">
             <header><span>ЗАПУСК ОБЪЕКТА</span><strong id="prepGateProgress">1 / 3</strong></header>
             <ol>
               <li class="is-done" id="prepGateContract"><i>1</i><span><strong>Договор</strong><small>Условия согласованы, аванс получен</small></span><b>✓</b></li>
-              <li id="prepGateTeam"><i>2</i><span><strong>Команда</strong><small>Выбрать людей и подтвердить состав</small></span><b>2</b></li>
+              <li id="prepGateTeam"><i>2</i><span><strong>Ресурсы и график</strong><small>Выбрать людей, бригады и ответственных</small></span><b>2</b></li>
               <li id="prepGateMaterials"><i>3</i><span><strong>Материалы</strong><small>Заказать пакет для первого фронта</small></span><b>3</b></li>
             </ol>
           </section>
-          <div class="subheading"><span>ВАША КОМАНДА</span><strong id="prepBudget"></strong></div>
+          <section class="prep-selection-summary" id="prepSelectionSummary" aria-live="polite"></section>
+          <section class="prep-economics" id="prepEconomics"></section>
+          <div class="subheading"><span>ШТАТ КОМПАНИИ</span><strong>уже на зарплате</strong></div>
+          <p class="prep-section-help">Повторно нанимать не нужно. Назначенный сотрудник уедет из штаба на этот объект и появится на площадке.</p>
+          <div id="prepCompanyStaff" class="prep-company-staff"></div>
+          <div class="subheading"><span>ПРОЕКТНЫЕ СПЕЦИАЛИСТЫ</span><strong id="prepBudget"></strong></div>
+          <p class="prep-section-help">Разовое усиление только для этого объекта. Это не постоянный штат компании.</p>
           <div id="teamPicker" class="team-picker"></div>
-          <div class="subheading"><span>ПОДРЯДЧИКИ</span><strong>выход на объект</strong></div>
+          <div class="subheading"><span>ПОДРЯДЧИКИ В СОСТАВЕ</span><strong>новых выбирайте в графике</strong></div>
           <div id="mapContractors" class="map-contractors"></div>
           <section class="prep-finance"><span><small>ДОСТУПНО: АВАНС + КАССА КОМПАНИИ</small><strong id="prepCombinedFunds">0 ₽</strong></span><button type="button" data-loan="300" data-loan-recipient="project">Кредит 300К на объект</button><button type="button" data-loan="800" data-loan-recipient="project">Кредит 800К на объект</button></section>
           <div class="prep-confirm"><button class="secondary-button" id="confirmPreparationButton">Подтвердить выбранный состав</button><small id="prepConfirmStatus">Состав можно менять и отзывать без штрафа.</small></div>
           <div class="prep-materials"><button class="secondary-button" id="orderStartupMaterials" disabled>Сначала подтвердите команду</button><small id="prepMaterialsStatus">Закупка откроется после подтверждения состава.</small></div>
-          <div class="prep-exit-actions"><button class="secondary-button" id="cancelPreparationButton">Отказаться и вернуться к заказам</button><button class="primary-button hero-button" id="enterSite" disabled>Выйти на объект <span>→</span></button></div>
+          <div class="prep-exit-actions"><button class="secondary-button" id="cancelPreparationButton">Отказаться и вернуться к заказам</button><button class="primary-button hero-button" id="enterSite" disabled>Утвердить план и выйти на объект <span>→</span></button></div>
         </div>
       </section>
     </div>

@@ -2,21 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   adjustContractorManpower,
+  applyContractCard,
   applyEventChoice,
   applyCatalogEventChoice,
   advanceOrganizationDays,
   captureMasterSchedule,
   calculateSiteCongestion,
   closeDayFinances,
+  contractNegotiationChance,
   createInitialState,
   crewHeadcount,
   cyclePriority,
   developHeadquarters,
   dismissContractor,
+  ensureOrganization,
   ensureProjectFinance,
   ensureRuntimeCrews,
   ensureWorkforceMarket,
   forceAssignCrew,
+  getDayRhythm,
+  getProjectCloseout,
   hardTaskBlockers,
   hireContractor,
   hireTeamMember,
@@ -25,7 +30,9 @@ import {
   settleContractor,
   startTaskNow,
   taskCrewAvailability,
+  taskControlFactor,
   requestClientFunding,
+  resolveContractNegotiation,
   resolveScheduleRevision,
   sendPressureInstruction,
   sendContractorEscalation,
@@ -284,6 +291,34 @@ test('incident delays production without teleporting the company clock',()=>{
   tickState(state,1);assert.equal(state.elapsed,before+1);assert.equal(survey.progress,0);assert.equal(state.productionDelayHours,3);
 });
 
+test('migration inspection pauses physical work but does not freeze off-site design at 98 percent',()=>{
+  const state=createInitialState();assert.equal(hireTeamMember(state,'designer').ok,true);
+  state.started=true;state.paused=false;state.eventSchedule=[];state.nextSituationAt=999;state.tutorial=null;
+  const survey=state.tasks.find(task=>task.id==='survey');survey.status='done';
+  const project=state.tasks.find(task=>task.id==='project');const designer=state.crews.find(crew=>crew.id==='team-designer');
+  Object.assign(project,{status:'active',progress:.98,crewId:designer.id,enabledToday:true,committed:true});designer.taskId=project.id;
+  const event=allRandomEvents.find(item=>item.id==='migracionnaya-proverka');
+  assert.equal(applyCatalogEventChoice(state,event,'legalnaya-pauza'),true);
+  tickState(state,1);
+  assert.equal(project.status,'awaiting');
+  assert.equal(state.productionDelayHours,4);
+});
+
+test('temporary networks and demolition are parallel fronts in new and migrated projects',()=>{
+  const renovation=createCampaignOrders().find(order=>order.projectType==='renovation');
+  const tasks=buildTasksForOrder(renovation);
+  for(const task of tasks.filter(item=>['demo-partitions','demo-equipment','demo-ceiling'].includes(item.id))){
+    assert.equal(task.deps.includes('temporary-networks'),false);
+    assert.equal(task.hardDeps.includes('temporary-networks'),false);
+    task.deps.push('temporary-networks');task.hardDeps.push('temporary-networks');
+  }
+  const state=createInitialState();state.tasks=tasks;ensureRuntimeCrews(state);
+  for(const task of state.tasks.filter(item=>['demo-partitions','demo-equipment','demo-ceiling'].includes(item.id))){
+    assert.equal(task.deps.includes('temporary-networks'),false);
+    assert.equal(task.hardDeps.includes('temporary-networks'),false);
+  }
+});
+
 test('priority preempts lower priority work without losing its progress',()=>{
   const state=createInitialState();state.started=true;state.paused=false;state.eventSchedule=[];state.nextSituationAt=999;
   const crew=state.crews.find(item=>item.id==='general-crew');const low=state.tasks.find(item=>item.id==='move');const urgent={...low,id:'urgent-general',title:'Срочный вынос',short:'Срочный вынос',status:'ready',progress:0,crewId:null,enabledToday:true,committed:true,priority:2};
@@ -521,4 +556,60 @@ test('optional protection may be skipped for immediate savings and later dirt',(
 test('an in-house design office replaces a contractor and adds daily overhead',()=>{
   const state=createInitialState();state.hq.level=2;state.organization.cash=500;const hired=toggleInHouseDesign(state);assert.equal(hired.ok,true);assert.ok(state.crews.some(crew=>crew.id==='inhouse-design'));const budget=state.budget;closeDayFinances(state);assert.ok(state.budget<=budget-18);assert.match(state.finance.ledger[0].text,/постоянный штат 12К/);
   assert.equal(toggleInHouseDesign(state).active,false);assert.ok(!state.crews.some(crew=>crew.id==='inhouse-design'));
+});
+
+test('contract sliders are a real negotiation whose odds improve with company strength',()=>{
+  const order=generateOrders(makeSeededRng(77),1)[0];order.requiredLevel=1;order.requiresProjects=0;
+  const state=createInitialState();state.organization.cash=5000;assert.equal(selectOrder(state,order),true);
+  applyContractCard(state,{id:'arg-a',trust:1});applyContractCard(state,{id:'arg-b',quality:1});
+  state.contract.proposalBudgetPct=125;state.contract.proposalDeadlinePct=75;
+  const noviceChance=contractNegotiationChance(state);
+  const organization=ensureOrganization(state);organization.playerXp=900;organization.reputation=90;
+  const kingChance=contractNegotiationChance(state);assert.ok(kingChance>noviceChance);
+  const oldBudget=state.contract.budget;const result=resolveContractNegotiation(state,()=>0);
+  assert.equal(result.accepted,true);assert.equal(state.contract.budget,Math.round(oldBudget*1.25));assert.equal(state.contract.negotiated,true);
+});
+
+test('resource schedule reserves a named crew instead of silently assigning another one',()=>{
+  const state=createInitialState();state.started=true;state.paused=false;state.eventSchedule=[];state.nextSituationAt=999;
+  assert.equal(hireTeamMember(state,'designer').ok,true);
+  const survey=state.tasks.find(task=>task.id==='survey');survey.status='done';
+  const project=state.tasks.find(task=>task.id==='project');project.status='ready';project.enabledToday=true;project.plannedCrewId='team-designer';
+  const availability=taskCrewAvailability(state,project);assert.deepEqual(availability.matching.map(crew=>crew.id),['team-designer']);
+  const started=startTaskNow(state,project.id);assert.equal(started.ok,true);assert.equal(project.crewId,'team-designer');
+});
+
+test('contractor control depends on level and one employee loses focus across parallel fronts',()=>{
+  const state=createInitialState();state.selectedOrder={id:'control-site',area:240};state.portfolio.activeProjectId='control-site';
+  const contractor=state.contractors.find(item=>item.skill==='general');contractor.level=1;assert.equal(hireContractor(state,contractor.id).ok,true);
+  const crew=state.crews.find(item=>item.id===`crew-${contractor.id}`);const first=state.tasks.find(item=>item.skill==='general');const second=state.tasks.find(item=>item.id!==first.id&&item.skill!=='management');
+  Object.assign(first,{plannedStartDay:1,plannedFinishDay:2});Object.assign(second,{plannedStartDay:1,plannedFinishDay:2});
+  const uncontrolled=taskControlFactor(state,first,crew);assert.ok(uncontrolled.factor<1);contractor.level=5;crew.level=5;assert.ok(taskControlFactor(state,first,crew).factor>uncontrolled.factor);
+  const foreman=state.staff.employees.find(item=>item.roleId==='foreman');foreman.assignedProjectId='control-site';first.supervisorEmployeeId=foreman.id;
+  const focused=taskControlFactor(state,first,crew);second.supervisorEmployeeId=foreman.id;const overloaded=taskControlFactor(state,first,crew);
+  assert.ok(focused.factor>uncontrolled.factor);assert.ok(overloaded.factor<focused.factor);assert.equal(overloaded.load,2);
+});
+
+test('day rhythm makes planning, production, intervention and closeout explicit',()=>{
+  const state=createInitialState();state.started=true;state.phase='planning';state.needsPlanning=true;assert.equal(getDayRhythm(state).id,'plan');
+  state.needsPlanning=false;state.phase='execution';state.paused=false;state.shiftStartedAt=0;state.elapsed=2;assert.equal(getDayRhythm(state).id,'production');
+  state.elapsed=5;assert.equal(getDayRhythm(state).id,'chaos');
+  state.needsReport=true;assert.equal(getDayRhythm(state).id,'report');
+});
+
+test('project closeout tells the player what blocks the next and final payment',()=>{
+  const state=createInitialState();state.started=true;state.finance.contractValue=1000;state.finance.received=850;
+  for(const task of state.tasks)task.status='done';
+  state.tasks.find(task=>task.id==='executive-docs').status='ready';
+  state.sitePhysicallyComplete=true;
+  const docs=getProjectCloseout(state);assert.equal(docs.status,'docs');assert.equal(docs.finalDue,150);assert.match(docs.hint,/ИД/);
+  state.tasks.find(task=>task.id==='executive-docs').status='done';state.tasks.find(task=>task.id==='inspect').status='ready';
+  const inspection=getProjectCloseout(state);assert.equal(inspection.status,'inspection');assert.match(inspection.hint,/150/);
+});
+
+test('event decisions create a themed follow-up chain and communication trace',()=>{
+  const state=createInitialState();state.started=true;const event=allRandomEvents.find(item=>item.id==='client-approved-extras');
+  assert.equal(applyCatalogEventChoice(state,event,event.options[0].id),true);
+  assert.equal(state.chaosDirector.chain.originId,event.id);assert.ok(state.chaosDirector.chain.themes.includes('client'));
+  assert.equal(state.communicationHistory.at(-1).channel,'email');
 });

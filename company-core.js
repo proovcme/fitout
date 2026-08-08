@@ -198,7 +198,7 @@ export function setProjectDelegation(state,projectId,mode,policy={}){
 export function assignEmployee(state,employeeId,projectId){
   ensureGameSaveV2(state);const employee=state.staff.employees.find(item=>item.id===employeeId&&item.status==='employed');const project=state.portfolio.projects.find(item=>item.id===projectId);if(!employee||!project)return {ok:false,reason:'missing'};
   const day=state.companyCalendar.day;if(employee.unavailableUntilDay>day)return {ok:false,reason:'unavailable'};
-  const oldProject=employee.assignedProjectId?state.portfolio.projects.find(item=>item.id===employee.assignedProjectId):null;if(oldProject)oldProject.staffIds=oldProject.staffIds.filter(id=>id!==employeeId);
+  const oldProject=employee.assignedProjectId?state.portfolio.projects.find(item=>item.id===employee.assignedProjectId):null;if(oldProject){oldProject.staffIds=oldProject.staffIds.filter(id=>id!==employeeId);if(oldProject.managerEmployeeId===employeeId)oldProject.managerEmployeeId=null;}
   employee.assignedProjectId=projectId;project.staffIds??=[];if(!project.staffIds.includes(employeeId))project.staffIds.push(employeeId);
   state.staff.assignments=state.staff.assignments.filter(item=>!(item.day===day&&item.employeeId===employeeId));state.staff.assignments.push({employeeId,projectId,day,kind:'primary'});
   if(employee.roleId==='project-manager'||employee.roleId==='foreman')project.managerEmployeeId=employeeId;return {ok:true,employee,project};

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FitOut Simulator — макет главы</title>
+  <style>
+    :root{--ink:#162a35;--blue:#173c4e;--paper:#f2ead8;--paper-deep:#ded0b3;--red:#b34232;--yellow:#e3bd54;--green:#66886d;--muted:#62737a;--shadow:rgba(13,31,39,.34)}
+    *{box-sizing:border-box}html,body{min-height:100%;margin:0}body{min-width:320px;color:var(--ink);background:#132b37;font-family:ui-rounded,"Avenir Next",system-ui,sans-serif;overflow-x:hidden}
+    button{font:inherit}button:focus-visible{outline:3px solid var(--yellow);outline-offset:3px}
+    .stage{min-height:100svh;padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));background:radial-gradient(circle at 20% 10%,#315b68 0,transparent 35%),linear-gradient(135deg,#102731,#1c4350)}
+    .game{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 300px;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;max-width:1480px;min-height:calc(100svh - 28px);margin:auto;padding:16px;background:var(--paper);box-shadow:12px 14px 0 rgba(5,17,23,.45),0 32px 90px rgba(0,0,0,.35);overflow:hidden}
+    .blueprint{position:absolute;inset:0;opacity:.17;pointer-events:none;background-image:linear-gradient(rgba(17,57,73,.32) 1px,transparent 1px),linear-gradient(90deg,rgba(17,57,73,.32) 1px,transparent 1px);background-size:24px 24px;mask-image:linear-gradient(90deg,#000,transparent 68%)}
+    .topbar{position:relative;z-index:1;grid-column:1/-1;display:flex;align-items:center;gap:13px;padding-bottom:12px;border-bottom:1px solid rgba(22,42,53,.25)}
+    .logo{display:grid;grid-template-columns:36px auto;align-items:center;gap:8px;margin-right:auto}.logo i{display:grid;place-items:center;width:36px;height:36px;color:var(--paper);background:var(--blue);font-size:23px;font-style:normal;font-weight:950;transform:rotate(-5deg)}.logo strong{display:block;font-family:Georgia,serif;font-size:17px;line-height:.9;letter-spacing:-.05em}.logo small{display:block;margin-top:4px;color:var(--red);font-size:8px;font-weight:900;letter-spacing:.12em}
+    .chapter{display:grid;gap:3px;min-width:0}.chapter span{color:var(--red);font-size:8px;font-weight:900;letter-spacing:.12em}.chapter b{font-family:Georgia,serif;font-size:18px;white-space:nowrap}.clock{display:grid;grid-auto-flow:column;align-items:center;gap:9px;margin-left:auto}.clock small{font-size:8px;font-weight:900;letter-spacing:.1em}.clock strong{font-size:19px;font-variant-numeric:tabular-nums}.round{width:36px;height:36px;border:1px solid var(--ink);border-radius:50%;color:var(--ink);background:transparent;cursor:pointer}.round:hover{color:var(--paper);background:var(--blue)}
+    .world{position:relative;min-height:510px;overflow:hidden;border:2px solid var(--blue);box-shadow:6px 7px 0 var(--paper-deep);background:#d5c9ab}.world::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(242,234,216,.15),rgba(13,35,42,.23)),url('../public/assets/mission-meeting-room-v1.png') center/cover no-repeat;mix-blend-mode:multiply;opacity:.55}.world-art{position:absolute;inset:0;background:linear-gradient(90deg,rgba(242,234,216,.08),transparent 45%),url('../public/assets/mission-meeting-room-v1.png') center/cover no-repeat;filter:saturate(.76) contrast(1.04)}
+    .objective{position:absolute;z-index:2;top:16px;left:16px;max-width:360px;padding:12px 14px;color:var(--paper);background:rgba(18,49,61,.92);box-shadow:4px 5px 0 rgba(179,66,50,.85)}.objective small{display:block;color:var(--yellow);font-size:8px;font-weight:950;letter-spacing:.15em}.objective b{display:block;margin:4px 0;font-family:Georgia,serif;font-size:23px;line-height:1}.objective span{display:block;color:#dde8df;font-size:10px;line-height:1.35}
+    .world-actions{position:absolute;z-index:2;right:14px;top:14px;display:grid;gap:7px}.world-actions button{min-width:44px;min-height:42px;padding:0 10px;color:var(--paper);background:rgba(18,49,61,.92);border:1px solid rgba(242,234,216,.5);font-size:17px;cursor:pointer}.world-actions button:hover{background:var(--red)}
+    .speech{position:absolute;z-index:2;right:18%;bottom:24%;padding:8px 10px;background:var(--paper);border:1px solid var(--ink);box-shadow:3px 4px 0 rgba(22,42,53,.35);font-family:Georgia,serif;font-size:15px;transform:rotate(-3deg)}.speech::after{content:"";position:absolute;right:18px;bottom:-12px;border:7px solid transparent;border-top-color:var(--paper)}
+    .chaos{position:absolute;z-index:4;right:20px;bottom:18px;width:min(360px,calc(100% - 36px));padding:14px;color:var(--ink);background:var(--yellow);box-shadow:5px 6px 0 var(--red);transform:rotate(-1deg)}.chaos[hidden]{display:none}.chaos small{display:block;color:var(--red);font-size:8px;font-weight:950;letter-spacing:.14em}.chaos h2{margin:5px 0 6px;font-family:Georgia,serif;font-size:23px;line-height:.95}.chaos p{margin:0 0 10px;font-size:10px;line-height:1.45}.chaos div{display:flex;gap:7px}.chaos button{flex:1;min-height:38px;color:var(--paper);background:var(--blue);border:0;font-size:9px;font-weight:900;cursor:pointer}.chaos button:last-child{color:var(--ink);background:transparent;border:1px solid var(--ink)}
+    .party{position:relative;z-index:1;display:grid;align-content:start;gap:10px;padding:4px 0}.party header{display:flex;justify-content:space-between;align-items:end}.party header small{color:var(--red);font-size:8px;font-weight:950;letter-spacing:.14em}.party header b{font-family:Georgia,serif;font-size:20px}.party-card{display:grid;grid-template-columns:43px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px;background:rgba(255,255,255,.38);border:1px solid rgba(22,42,53,.33);box-shadow:3px 4px 0 rgba(22,42,53,.16)}.party-card i{display:grid;place-items:center;width:39px;height:39px;border-radius:50% 45% 48% 43%;color:var(--ink);background:var(--color);font-style:normal;font-size:10px;font-weight:950}.party-card span{display:grid;gap:3px;min-width:0}.party-card b{font-size:10px}.party-card small{color:var(--muted);font-size:8px;line-height:1.25}.party-card em{color:var(--red);font-size:7px;font-style:normal;font-weight:900;letter-spacing:.07em}.party-card.active{background:#fff6dc;border:2px solid var(--red);transform:translateX(-4px)}
+    .quest-log{position:relative;z-index:1;grid-column:1/-1;display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;padding:11px 13px;background:rgba(23,60,78,.94);color:var(--paper)}.quest-log span{display:grid;gap:3px}.quest-log small{color:var(--yellow);font-size:8px;font-weight:950;letter-spacing:.12em}.quest-log b{font-size:12px}.quest-log p{margin:0;color:#ccd9d2;font-size:9px}.quest-log button{min-height:43px;padding:0 15px;color:var(--ink);background:var(--yellow);border:0;box-shadow:3px 3px 0 var(--red);font-size:10px;font-weight:950;cursor:pointer}.quest-log button:hover{transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--red)}
+    .drawer{position:absolute;z-index:8;right:-410px;top:0;width:min(390px,100%);height:100%;padding:22px;color:var(--paper);background:#153947;box-shadow:-10px 0 28px rgba(0,0,0,.3);transition:right .28s cubic-bezier(.2,.8,.2,1);overflow:auto}.drawer.open{right:0}.drawer header{display:flex;justify-content:space-between;gap:10px}.drawer h2{margin:8px 0;font-family:Georgia,serif;font-size:29px;line-height:.95}.drawer p{color:#d7e0d9;font-size:11px;line-height:1.5}.drawer button{color:var(--paper);background:transparent;border:1px solid rgba(242,234,216,.6);cursor:pointer}.drawer-close{width:34px;height:34px;font-size:19px}.card-note{margin:16px 0;padding:14px;color:var(--ink);background:var(--paper);box-shadow:4px 5px 0 var(--red)}.card-note b{font-family:Georgia,serif;font-size:18px}.card-note p{color:#475b62;font-size:10px}.card-note button{min-height:38px;padding:0 11px;color:var(--paper);background:var(--red);border:0;font-size:9px;font-weight:900}
+    @media(max-width:900px){.game{grid-template-columns:1fr;grid-template-rows:auto minmax(410px,1fr) auto;height:auto}.party{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.party header{grid-column:1/-1}.party-card{grid-template-columns:1fr;padding:7px}.party-card i{width:34px;height:34px}.party-card em{display:none}.party-card small{min-height:20px}.world{min-height:470px}.quest-log{grid-column:1}.chapter{display:none}}
+    @media(max-width:600px){.stage{padding:0}.game{min-height:100svh;padding:12px;gap:10px;box-shadow:none}.logo strong{font-size:15px}.clock small{display:none}.world{min-height:52svh}.objective{top:10px;left:10px;max-width:calc(100% - 78px);padding:9px 10px}.objective b{font-size:18px}.objective span{font-size:9px}.speech{right:10%;bottom:32%;font-size:12px}.chaos{right:13px;bottom:12px;padding:11px}.chaos h2{font-size:20px}.party-card b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quest-log{grid-template-columns:1fr}.quest-log button{width:100%}.drawer{width:100%;right:-100%}.camp-rules{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <section class="game" aria-label="Макет первой главы FitOut Simulator">
+      <div class="blueprint"></div>
+      <header class="topbar">
+        <div class="logo"><i>F</i><span><strong>FITOUT<br>SIMULATOR</strong><small>король генподряда</small></span></div>
+        <div class="chapter"><span>ГЛАВА 1 · ПЕРВЫЙ ПОХОД</span><b>Переговорная к понедельнику</b></div>
+        <div class="clock"><small>СБ · ДЕНЬ 1</small><strong>09:42</strong><button class="round" id="pause" aria-label="Пауза">Ⅱ</button></div>
+      </header>
+
+      <section class="world" aria-label="Живая стройплощадка">
+        <div class="world-art"></div>
+        <div class="objective"><small>ЦЕЛЬ ГЛАВЫ</small><b>Освободить переговорную</b><span>Снимите старые сети, защитите мебель и не дайте заказчику увидеть пыль.</span></div>
+        <nav class="world-actions" aria-label="Действия на площадке"><button data-drawer="chat" aria-label="Чат стройки">◌</button><button data-drawer="quest" aria-label="Цели главы">⌁</button><button id="chaosButton" aria-label="Показать срочный вопрос">!</button></nav>
+        <span class="speech">«Кто согласовал потолок?»</span>
+        <section class="chaos" id="chaos" hidden aria-live="polite"><small>СРОЧНЫЙ ВОПРОС · 09:42</small><h2>Электрик нашёл кабель без владельца</h2><p>Можно остановить фронт и разобраться. Можно сделать вид, что это часть концепции.</p><div><button data-solve="careful">Разобраться</button><button data-solve="risky">«Порешать»</button></div></section>
+      </section>
+
+      <aside class="party" aria-label="Отряд на объекте">
+        <header><small>ВАШ ОТРЯД</small><b>4 человека</b></header>
+        <article class="party-card active" style="--color:#e3bd54"><i>ВЫ</i><span><b>Капитан</b><small>Генподрядчик<br>+18% в зоне</small></span><em>В ПЕРЕГОВОРНОЙ</em></article>
+        <article class="party-card" style="--color:#d87661"><i>АН</i><span><b>Алина</b><small>Руководитель проекта<br>держит сроки</small></span><em>В ШТАБЕ</em></article>
+        <article class="party-card" style="--color:#7eb8d0"><i>БТ</i><span><b>Борис</b><small>Технадзор<br>видит дефекты</small></span><em>С БРИГАДОЙ</em></article>
+        <article class="party-card" style="--color:#9d85d2"><i>МК</i><span><b>Мария</b><small>Архитектор<br>проектирует риск</small></span><em>ДУМАЕТ</em></article>
+      </aside>
+
+      <footer class="quest-log"><span><small>СЕЙЧАС ВАЖНО</small><b id="status">Бригада защищает мебель. 2 минуты до следующей проблемы.</b><p>Смотрите на площадку. В таблицу можно заглянуть потом — если совсем захочется испортить себе утро.</p></span><button data-drawer="quest">Открыть журнал похода →</button></footer>
+
+      <aside class="drawer" id="drawer" aria-label="Журнал похода">
+        <header><span><small>ПЕРВАЯ ГЛАВА</small><h2 id="drawerTitle">Журнал похода</h2></span><button class="drawer-close" id="drawerClose" aria-label="Закрыть">×</button></header>
+        <p id="drawerText">У каждой стройки есть ясная цель. Она существует ровно до первого звонка заказчика.</p>
+        <article class="card-note"><b>1. Освободить фронт</b><p>Подсобники и демонтажники убирают мебель и старые сети. Без этого следующие работы не начнутся.</p><button>Камера к фронту</button></article>
+        <article class="card-note"><b>2. Удержать людей</b><p>Если бригада стоит без задачи, она уходит курить. Иногда — совсем.</p><button>Позвать прораба</button></article>
+        <article class="card-note"><b>3. Сдать этап</b><p>Готово — не значит принято. Покажите результат заказчику и заберите деньги.</p><button>Спросить про деньги</button></article>
+      </aside>
+    </section>
+  </main>
+  <script>
+    const drawer=document.querySelector('#drawer');const title=document.querySelector('#drawerTitle');const text=document.querySelector('#drawerText');const status=document.querySelector('#status');
+    const copy={chat:['Чат стройки','Борис: «У меня два вопроса. Один технический, другой — почему на объекте нет кофе».'],quest:['Журнал похода','В первой главе нет лишних меню: только цель, отряд и последствия решений.']};
+    document.querySelectorAll('[data-drawer]').forEach(button=>button.addEventListener('click',()=>{const item=copy[button.dataset.drawer];title.textContent=item[0];text.textContent=item[1];drawer.classList.add('open')}));
+    document.querySelector('#drawerClose').addEventListener('click',()=>drawer.classList.remove('open'));
+    document.querySelector('#chaosButton').addEventListener('click',()=>document.querySelector('#chaos').hidden=false);
+    document.querySelectorAll('[data-solve]').forEach(button=>button.addEventListener('click',()=>{const risky=button.dataset.solve==='risky';document.querySelector('#chaos').hidden=true;status.textContent=risky?'Вы «порешали». Кабель исчез, а доверие электрика — нет. Пока.':'Борис вызвал электрика, работа задержится на 20 минут, зато потолок останется на месте.';}));
+    document.querySelector('#pause').addEventListener('click',event=>{event.currentTarget.textContent=event.currentTarget.textContent==='Ⅱ'?'▶':'Ⅱ'});
+  </script>
+</body>
+</html>

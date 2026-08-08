@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const script=readFileSync(new URL('../game.js',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../styles.css',import.meta.url),'utf8');
+const core=readFileSync(new URL('../game-core.js',import.meta.url),'utf8');
 
 test('every static button is wired directly or through its form',()=>{
   const ids=[...html.matchAll(/<button[^>]*\sid="([^"]+)"/g)].map(match=>match[1]);
@@ -19,7 +20,7 @@ test('every delegated button family has a matching click route',()=>{
     'loan','order-id','contract-card','team-hire','map-hire','day-task',
     'schedule-day','schedule-order','send-urgent','email-template','send-email',
     'task','priority','start-task','skip-task','hire','contract-manpower','settle-contractor','find-contractor','contractor-filter','event-choice','situation-choice','close-modal','close-sidebook',
-    'company-tab','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','create-change','resolve-change','equip-artifact',
+    'company-tab','market-section','open-employee-tree','close-employee-tree','employee-upgrade','hq-upgrade','open-project','add-portfolio-order','assign-employee','transfer-employee','hire-employee','dismiss-employee','outsource-role','pay-obligation','reserve','start-hq-project','create-change','resolve-change','equip-artifact',
   ];
   for(const name of delegated)assert.ok(script.includes(`closest('[data-${name}]')`),`missing handler for data-${name}`);
 });
@@ -73,6 +74,32 @@ test('staff progression is explained and boss artifacts have a real loadout',()=
   assert.match(script,/data-equip-artifact/);
 });
 
+test('headquarters explains staff assignment and separates hiring from outsourcing',()=>{
+  assert.match(script,/Штат — это люди на постоянной зарплате/);
+  assert.match(script,/Назначили на объект — он уезжает туда, появляется в 3D/);
+  assert.match(script,/Сам по себе на объект не телепортируется/);
+  assert.match(script,/data-market-section="orders"/);
+  assert.match(script,/data-market-section="people"/);
+  assert.match(script,/data-market-section="outsource"/);
+  assert.match(script,/Аутсорсер не появится в 3D и не закрепляется за объектом/);
+  assert.match(html,/id="prepCompanyStaff"/);
+  assert.match(script,/data-prep-assign-employee/);
+  assert.match(script,/назначен на объект без повторного найма/);
+});
+
+test('mobilization is one resource planning screen with staff contractors schedule and cash flow',()=>{
+  assert.match(html,/id="prepSelectionSummary"/);
+  assert.match(html,/id="prepResourcePlan"/);
+  assert.match(html,/id="prepEconomics"/);
+  assert.doesNotMatch(html,/id="mapGrid"/);
+  assert.match(script,/data-prep-resource-crew/);
+  assert.match(script,/data-prep-supervisor/);
+  assert.match(script,/data-prep-shift/);
+  assert.match(script,/prep-gantt-bar/);
+  assert.match(script,/taskControlFactor/);
+  assert.match(script,/Единый план утверждён/);
+});
+
 test('new game uses the headquarters market without the obsolete map flow',()=>{
   const resetSection=script.slice(script.indexOf('function resetGame()'),script.indexOf('function cancelCurrentOrder()'));
   assert.match(resetSection,/companyTab='market'/);
@@ -95,9 +122,34 @@ test('new game is a destructive two-step career reset instead of a market shortc
   assert.match(styles,/\.menu-button\.danger-button\.is-armed/);
 });
 
+test('career entry leads with one next action and keeps headquarters detail opt-in',()=>{
+  assert.match(html,/id="nextActionTitle"/);
+  assert.match(html,/id="partyRoster"/);
+  assert.match(html,/id="companyConsole"[^>]*hidden/);
+  assert.match(html,/id="openMarketButton"/);
+  assert.match(html,/id="openHeadquartersButton"/);
+  assert.match(script,/function openHeadquarters\(tab='portfolio'\)/);
+  assert.match(script,/continueButton\.dataset\.menuIntent='market'/);
+});
+
+test('a new career enters chapter one directly instead of detouring through the company spreadsheet',()=>{
+  assert.match(html,/id="campScene" hidden/);
+  assert.match(html,/id="openCompanyDeskButton"/);
+  assert.match(script,/function startFirstAdventure\(\)/);
+  assert.match(script,/if\(\$\('#continueGameButton'\)\.dataset\.menuIntent==='market'\)\{startFirstAdventure\(\);return;\}/);
+  assert.match(script,/if\(tutorialRequired\(\)\)\{startFirstAdventure\(\);return;\}/);
+  assert.match(script,/syncActiveProjectToPortfolio\(state\);/);
+});
+
+test('the new campaign art replaces the old menu canvas backdrop',()=>{
+  assert.match(styles,/hq-basement-adventure-v1\.png/);
+  assert.match(styles,/mission-meeting-room-v1\.png/);
+  assert.match(styles,/\.hq-menu-scene #hqCanvas \{ display:none; \}/);
+});
+
 test('staff controls use player-facing language instead of internal abbreviations',()=>{
-  assert.match(script,/Навыки · \$\{developmentPointsLabel\(employee\.developmentPoints\)\}/);
-  assert.match(script,/Перебросить сегодня/);
+  assert.match(script,/Развивать · \$\{developmentPointsLabel\(employee\.developmentPoints\)\}/);
+  assert.match(script,/Срочно перебросить/);
   assert.match(script,/потеря 2 часов и \+15 стресса/);
   assert.doesNotMatch(script,/Развитие · \$\{employee\.developmentPoints\} ОР/);
   assert.match(script,/Критичные вопросы: \$\{urgent\}/);
@@ -164,4 +216,33 @@ test('laptop negotiation is readable and never reopens halfway down the brief',(
   assert.match(styles,/\.tutorial-coach h2 \{ margin:11px 0 7px; font-size:19px/);
   assert.match(script,/function openBriefModal\(\)/);
   assert.match(script,/surface\.scrollTop=0/);
+});
+
+test('site communications stay prominent while operational lists collapse into drawers',()=>{
+  assert.match(html,/class="management-card whatsapp"/);
+  assert.match(html,/class="management-card outlook"/);
+  assert.match(html,/<details class="ops-drawer situation-inbox"/);
+  assert.match(html,/<details class="ops-drawer site-contractor-roster"/);
+  assert.match(styles,/\.management-menu \{ display:grid; grid-template-columns:repeat\(2/);
+});
+
+test('new site questions interrupt the scene and magic resolve is a visible risky action',()=>{
+  assert.match(html,/class="situation-interrupt"/);
+  assert.match(html,/id="magicResolveButton"[\s\S]*?ПОРЕШАТЬ/);
+  assert.match(script,/announcedSituationIds/);
+  assert.match(script,/refs\.situationInterrupt\.hidden=false/);
+  assert.match(core,/backlash:\'cost\'/);
+  assert.match(core,/backlash:\'delay\'/);
+  assert.match(core,/backlash:\'chaos\'/);
+  assert.match(styles,/@keyframes situation-interrupt-in/);
+});
+
+test('contract negotiation uses sliders and the master schedule binds named crews',()=>{
+  assert.match(html,/data-contract-slider="budget"/);
+  assert.match(html,/data-contract-slider="deadline"/);
+  assert.match(script,/contractNegotiationChance\(state\)/);
+  assert.match(script,/resolveContractNegotiation\(state\)/);
+  assert.match(script,/data-schedule-crew=/);
+  assert.match(script,/РЕСУРС ЗАНЯТ ПАРАЛЛЕЛЬНО/);
+  assert.match(styles,/\.schedule-crew-select/);
 });

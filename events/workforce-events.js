@@ -13,6 +13,7 @@ export const workforceEvents = [
         effect: 'Юрист собирает папку, а рабочие ждут окончания бумажного спектакля.',
         note: 'Дороже и медленнее, зато заказчик видит управляемый процесс.',
         deltas: { budget: -90, quality: 1, trust: 5, time: 5 },
+        delayScope: 'physical',
         scene: { actor: 'inspector', actorCount: 2, hideSkill: 'general', hideHours: 5 },
       },
       {
@@ -21,6 +22,7 @@ export const workforceEvents = [
         effect: 'На площадку приезжают новые люди и сначала ищут, где здесь вообще стены.',
         note: 'Темп почти сохранён, но качество знакомства с проектом вызывает вопросы.',
         deltas: { budget: -160, quality: -4, trust: -2, time: 2 },
+        delayScope: 'physical',
         scene: { actor: 'worker', actorCount: 3, hideSkill: 'general', hideHours: 2, debris: 1 },
       },
     ],

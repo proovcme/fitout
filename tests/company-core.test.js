@@ -49,7 +49,15 @@ test('portfolio accepts three projects, switches snapshots and rejects a fourth'
 
 test('an employee has one primary site and emergency transfer costs time and stress',()=>{
   const root=projectState(21);addPortfolioProject(root,projectState(22));const [a,b]=root.portfolio.projects;const employee=root.staff.employees[0];assert.equal(assignEmployee(root,employee.id,a.id).ok,true);assert.equal(assignEmployee(root,employee.id,b.id).ok,true);assert.equal(a.staffIds.includes(employee.id),false);assert.equal(b.staffIds.includes(employee.id),true);
+  const foreman=root.staff.employees.find(item=>item.roleId==='foreman');assert.equal(assignEmployee(root,foreman.id,a.id).ok,true);assert.equal(a.managerEmployeeId,foreman.id);assert.equal(assignEmployee(root,foreman.id,b.id).ok,true);assert.equal(a.managerEmployeeId,null);assert.equal(b.managerEmployeeId,foreman.id);
   const before=employee.stress;const moved=emergencyTransferEmployee(root,employee.id,a.id);assert.equal(moved.ok,true);assert.equal(moved.lostHours,2);assert.equal(employee.stress,before+15);assert.equal(emergencyTransferEmployee(root,employee.id,b.id).reason,'already-transferred');assert.equal(validateGameSaveV2(root).ok,true);
+});
+
+test('the initial company already employs a foreman who can be assigned without hiring again',()=>{
+  const root=projectState(25);const project=root.portfolio.projects[0];const foreman=root.staff.employees.find(item=>item.roleId==='foreman');
+  assert.ok(foreman);assert.equal(foreman.status,'employed');assert.equal(foreman.assignedProjectId,null);
+  assert.equal(assignEmployee(root,foreman.id,project.id).ok,true);
+  assert.equal(foreman.assignedProjectId,project.id);assert.ok(project.staffIds.includes(foreman.id));assert.equal(project.managerEmployeeId,foreman.id);
 });
 
 test('company ledger preserves cash and obligations distinguish receivables from payables',()=>{

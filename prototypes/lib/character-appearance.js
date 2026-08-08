@@ -1,0 +1,42 @@
+import{createSeededRng,weightedPick}from'./seed-utils.js';
+
+export const ANIMATION_MANIFEST={
+  schemaVersion:1,
+  required:['idle','walk','run','drill','hammer','sit','smoke','computer','carry'],
+  states:{
+    idle:{atlas:'idle',frames:4,rows:['front','back','left','right'],fps:.55,loop:true},
+    walk:{atlas:'walk',frames:8,rows:['front','back','left','right'],fps:7,loop:true},
+    run:{atlas:'walk',frames:8,rows:['front','back','left','right'],fps:10,loop:true},
+    drill:{atlas:'work',frames:4,row:0,fps:4.5,loop:true},hammer:{atlas:'work',frames:4,row:1,fps:4.5,loop:true},
+    sit:{atlas:'work',frames:4,row:2,fps:.65,loop:true},smoke:{atlas:'work',frames:4,row:3,fps:1.4,loop:true},
+    computer:{atlas:'work',frames:4,row:4,fps:3.2,loop:true},carry:{atlas:'work',frames:4,row:5,fps:5,loop:true}
+  }
+};
+
+export const APPEARANCE_PACKS={
+  drafted_builder_v1:{id:'drafted_builder_v1',label:'Рабочий · с бородой',roles:['worker'],bodyType:'adult',genderPresentation:'masculine',accentSlot:'uniform',helmetSlot:'profession',supports:ANIMATION_MANIFEST.required,atlases:{idle:'../public/assets/characters/foreman-idle-atlas-v2.png',walk:'../public/assets/characters/foreman-walk-atlas-v3.png',work:'../public/assets/characters/foreman-work-atlas-v1.png'}},
+  drafted_worker_clean_v1:{id:'drafted_worker_clean_v1',label:'Рабочий · без бороды',roles:['worker'],bodyType:'adult',genderPresentation:'masculine',accentSlot:'uniform',helmetSlot:'profession',supports:ANIMATION_MANIFEST.required,atlases:{idle:'../public/assets/characters/worker-clean-idle-atlas-v1.png',walk:'../public/assets/characters/worker-clean-walk-atlas-v1.png',work:'../public/assets/characters/worker-clean-work-atlas-v1.png'}},
+  drafted_project_manager_v1:{id:'drafted_project_manager_v1',label:'Руководитель проекта · герой',roles:['project_manager'],bodyType:'adult',genderPresentation:'masculine',accentSlot:'armband',helmetSlot:'profession',supports:ANIMATION_MANIFEST.required,atlases:{idle:'../public/assets/characters/project-manager-idle-atlas-v1.png',walk:'../public/assets/characters/project-manager-walk-atlas-v1.png',work:'../public/assets/characters/project-manager-work-atlas-v1.png'}},
+  drafted_foreman_white_v1:{id:'drafted_foreman_white_v1',label:'Прораб · белая каска',roles:['foreman'],bodyType:'adult',genderPresentation:'masculine',accentSlot:'uniform',helmetSlot:'profession',supports:ANIMATION_MANIFEST.required,atlases:{idle:'../public/assets/characters/foreman-white-idle-atlas-v1.png',walk:'../public/assets/characters/foreman-white-walk-atlas-v1.png',work:'../public/assets/characters/foreman-white-work-atlas-v1.png'}},
+  drafted_electrician_female_v1:{id:'drafted_electrician_female_v1',label:'Электрик · женщина',roles:['electrician','engineer'],bodyType:'adult',genderPresentation:'feminine',accentSlot:'uniform',helmetSlot:'profession',supports:ANIMATION_MANIFEST.required,atlases:{idle:'../public/assets/characters/electrician-female-idle-atlas-v1.png',walk:'../public/assets/characters/electrician-female-walk-atlas-v1.png',work:'../public/assets/characters/electrician-female-work-atlas-v1.png'}},
+  drafted_architect_v1:{id:'drafted_architect_v1',label:'Архитектор · берет и шарф',roles:['architect','designer'],bodyType:'adult',genderPresentation:'feminine',accentSlot:'scarf',helmetSlot:'none',supports:['idle'],atlases:{idle:'../public/assets/characters/architect-idle-atlas-v1.png'}},
+  drafted_client_v1:{id:'drafted_client_v1',label:'Заказчик · костюм и телефон',roles:['client'],bodyType:'adult',genderPresentation:'masculine',accentSlot:'tie',helmetSlot:'none',supports:['idle'],atlases:{idle:'../public/assets/characters/client-idle-atlas-v1.png'}},
+};
+
+export const APPEARANCE_OPTIONS={
+  builds:{compact:{label:'Компактный',scale:[.91,.96]},average:{label:'Обычный',scale:[1,1]},tall:{label:'Высокий',scale:[.96,1.07]},broad:{label:'Широкий',scale:[1.09,.99]}},
+  skinTones:{fair:'#f0b184',warm:'#d88d5f',olive:'#bd7e53',deep:'#8f5539'},
+  hairTones:{black:'#251b18',brown:'#4b2b1e',ginger:'#8a421f',grey:'#625c56'},
+  uniformTones:{project_manager:'#e8913e',client:'#695171',foreman:'#e6b63d',designer:'#8e6cc7',architect:'#8e6cc7',electrician:'#3f88d4',plumber:'#39a995',inspector:'#b65d50',engineer:'#6c8d9a',hvac:'#36a7a0',finisher:'#c96c55',worker:'#d4a941'}
+};
+export const ROLE_HELMET_TONES={project_manager:'#b8dc2f',foreman:'#f4f5ef',worker:'#e4b83f',electrician:'#2878c7',plumber:'#36a696',hvac:'#35a9a1',finisher:'#d88c3f',engineer:'#f4f5ef'};
+
+const keys=value=>Object.keys(value);
+const defaultPackForRole=role=>role==='project_manager'?'drafted_project_manager_v1':role==='client'?'drafted_client_v1':role==='foreman'?'drafted_foreman_white_v1':['architect','designer'].includes(role)?'drafted_architect_v1':role==='electrician'?'drafted_electrician_female_v1':'drafted_builder_v1';
+export function compatibleAppearancePacks(role){return Object.values(APPEARANCE_PACKS).filter(pack=>pack.roles.includes('*')||pack.roles.includes(role)).sort((a,b)=>Number(a.roles.includes('*'))-Number(b.roles.includes('*')))}
+export function availablePresentations(role){return[...new Set(compatibleAppearancePacks(role).map(pack=>pack.genderPresentation))]}
+export function generateAppearance(seed='appearance-001',role='worker',overrides={}){const rng=createSeededRng(seed),build=overrides.build||weightedPick(rng,[{value:'average',weight:5},{value:'compact',weight:2},{value:'tall',weight:2},{value:'broad',weight:2}]),skinTone=overrides.skinTone||APPEARANCE_OPTIONS.skinTones[keys(APPEARANCE_OPTIONS.skinTones)[Math.floor(rng()*keys(APPEARANCE_OPTIONS.skinTones).length)]],hairTone=overrides.hairTone||APPEARANCE_OPTIONS.hairTones[keys(APPEARANCE_OPTIONS.hairTones)[Math.floor(rng()*keys(APPEARANCE_OPTIONS.hairTones).length)]],rolePacks=compatibleAppearancePacks(role),presentationPacks=overrides.presentation?rolePacks.filter(pack=>pack.genderPresentation===overrides.presentation):rolePacks,packId=overrides.packId||(role==='worker'?presentationPacks[Math.floor(rng()*presentationPacks.length)]?.id:defaultPackForRole(role)),pack=APPEARANCE_PACKS[packId];if(!pack)throw new Error(`Неизвестный пакет внешности: ${packId}`);if(!pack.roles.includes('*')&&!pack.roles.includes(role))throw new Error(`${pack.label} не подходит классу ${role}`);const accentTone=overrides.accentTone||overrides.uniformTone||APPEARANCE_OPTIONS.uniformTones[role]||'#d4a941';return{schemaVersion:1,packId,build,renderScale:APPEARANCE_OPTIONS.builds[build]?.scale||[1,1],genderPresentation:pack.genderPresentation,supports:[...pack.supports],skinTone,hairTone,accentTone,uniformTone:accentTone,accentSlot:pack.accentSlot,helmetTone:ROLE_HELMET_TONES[role]||null,helmetSlot:pack.helmetSlot,accessory:overrides.accessory||'none'}}
+
+export function validateAnimationManifest(manifest=ANIMATION_MANIFEST){const errors=[];for(const state of manifest.required||[])if(!manifest.states?.[state])errors.push(`missing state: ${state}`);for(const[state,data]of Object.entries(manifest.states||{})){if(!Number.isInteger(data.frames)||data.frames<1)errors.push(`${state}: invalid frames`);if(!data.atlas)errors.push(`${state}: atlas missing`)}return{ok:errors.length===0,errors}}
+export function validateCharacterDefinition(definition,{classes={}}={}){const errors=[],pack=APPEARANCE_PACKS[definition?.appearance?.packId];if(definition?.schemaVersion!==1)errors.push('unsupported character schema');if(!definition?.id)errors.push('id missing');if(!classes[definition?.role])errors.push(`unknown class: ${definition?.role}`);if(!pack)errors.push(`unknown appearance pack: ${definition?.appearance?.packId}`);else for(const state of ANIMATION_MANIFEST.required)if(!pack.supports.includes(state))errors.push(`${pack.id} does not support ${state}`);return{ok:errors.length===0,errors}}
+export function makeCharacterDefinition(profile){return{schemaVersion:1,id:profile.id,seed:profile.seed,name:profile.name,role:profile.role,roleLabel:profile.roleLabel,appearance:profile.appearance,stats:profile.stats,traits:profile.traits,biography:profile.biography,reporting:profile.reporting,animationManifestVersion:ANIMATION_MANIFEST.schemaVersion}}
