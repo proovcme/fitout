@@ -3,6 +3,7 @@ export const SHIFT_FRONTS={
   trash:{id:'trash',label:'Освободить проход от мусора',required:true,reward:18},
   wetCable:{id:'wetCable',label:'Развести воду и электричество',required:true,reward:26},
   materials:{id:'materials',label:'Проверить поставку',required:true,reward:16},
+  construction:{id:'construction',label:'Физически закончить помещение',required:true,reward:38},
   panel:{id:'panel',label:'Принять маркировку щита',required:false,reward:14},
   door:{id:'door',label:'Обмерить, заказать и открыть дверь',required:true,reward:30}
 };
