@@ -1,5 +1,6 @@
 import test from'node:test';
 import assert from'node:assert/strict';
+import{readFileSync}from'node:fs';
 import*as THREE from'three';
 import{generateCharacter,frameRect,anchoredFrameDestination}from'../prototypes/lib/character-generator.js';
 import{ANIMATION_MANIFEST,APPEARANCE_PACKS,availablePresentations,validateAnimationManifest,validateCharacterDefinition,makeCharacterDefinition}from'../prototypes/lib/character-appearance.js';
@@ -13,6 +14,7 @@ import{generateBiography,BIOGRAPHY_VARIANT_FLOOR}from'../prototypes/lib/characte
 import{generateBark,commandDialogue,reportsTo,DIALOGUE_VARIANT_FLOOR}from'../prototypes/lib/character-dialogues.js';
 import{generateSite,advanceRoom,generateSpatialTasks,generateSpatialEvent,validateSite}from'../prototypes/lib/spatial-generator.js';
 import{MechanicsSandbox,SANDBOX_TASK_RULES}from'../prototypes/lib/mechanics-sandbox.js';
+import{generateAdventureSite,validateAdventureSite,ADVENTURE_SITE_TEMPLATES}from'../prototypes/lib/adventure-site-generator.js';
 
 test('prototype character generator reproduces a worker from one seed',()=>{const a=generateCharacter('crew-42'),b=generateCharacter('crew-42'),c=generateCharacter('crew-43');assert.deepEqual(a,b);assert.notEqual(a.id,c.id);assert.match(a.name,/\s/);assert.equal(a.traits.length,2)});
 
@@ -45,6 +47,10 @@ test('bot brain selects only work allowed to its class and follows the generated
 test('work animation requires a real visible station of the right type',()=>{assert.equal(contextReady({workId:'assemble_panel'}),false);assert.equal(contextReady({workId:'assemble_panel',station:{kind:'desk',object:{visible:true}}}),false);assert.equal(contextReady({workId:'assemble_panel',station:{kind:'panel',object:{visible:false}}}),false);assert.equal(contextReady({workId:'assemble_panel',station:{kind:'panel',object:{visible:true}}}),true)});
 
 test('space generator creates valid mutable rooms tasks and contextual events',()=>{const site=generateSite('floor-a',{stage:'demolition'}),same=generateSite('floor-a',{stage:'demolition'});assert.deepEqual(site,same);assert.equal(validateSite(site).ok,true);assert.equal(site.rooms.length,6);const before=generateSpatialTasks(site).length,room=site.rooms[1],previous=room.stage;advanceRoom(site,room.id);assert.notEqual(room.stage,previous);assert.equal(site.revision,2);assert.equal(generateSpatialTasks(site).length,before);const incident=generateSpatialEvent(site,'event-a');assert.ok(incident);assert.ok(site.rooms.some(item=>item.id===incident.roomId))});
+
+test('adventure office generator places content in logical functional zones',()=>{const site=generateAdventureSite('bankrot-chapter-one'),same=generateAdventureSite('bankrot-chapter-one');assert.deepEqual(site,same);assert.equal(validateAdventureSite(site).ok,true);assert.ok(ADVENTURE_SITE_TEMPLATES.length>=3);assert.equal(site.interactables.wetCable.zone,'engineering');assert.equal(site.interactables.materials.zone,'logistics');assert.equal(site.interactables.supply.zone,'entrance')});
+
+test('walkable chapter owns site actions and the old excel playground redirects to it',()=>{const chapter=readFileSync(new URL('../prototypes/fitout-chapter-one.html',import.meta.url),'utf8'),legacy=readFileSync(new URL('../prototypes/mechanics-playground.html',import.meta.url),'utf8');for(const action of['trash-hazard','wet-cable-hazard','paint-buckets','site-chair','barrier-inspect','supply-idle'])assert.match(chapter,new RegExp(`id:'${action}'`));assert.match(chapter,/class="site-chat"/);assert.doesNotMatch(chapter,/data-site-message/);assert.match(legacy,/location\.replace\('\.\/fitout-chapter-one\.html'\)/)});
 
 test('mechanics playground closes the full command work acceptance and payment loop',()=>{const game=new MechanicsSandbox('loop-test'),initialCash=game.economy.cash,task=game.availableTasks().find(item=>item.workType==='install_engineering'),person=game.people.find(item=>SANDBOX_TASK_RULES[task.workType].roles.includes(item.role));assert.equal(game.issueCommand(task.id,person.id,{throughSupervisor:true}).ok,true);for(let i=0;i<2000&&task.status==='working';i++){if(game.pendingEvent)game.resolveEvent('manage');game.tick(.2)}assert.equal(task.status,'awaiting_acceptance');let result=game.presentTask(task.id);for(let tries=0;tries<4&&!result.accepted;tries++){for(let i=0;i<1000&&task.status==='working';i++)game.tick(.2);result=game.presentTask(task.id)}assert.equal(result.accepted,true);assert.equal(game.accepted,1);assert.ok(game.economy.earned>0);assert.notEqual(game.economy.cash,initialCash);assert.ok(game.availableTasks().some(item=>item.roomId===task.roomId))});
 
