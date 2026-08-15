@@ -5,6 +5,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
 remote="${FITOUT_SSH:-root@185.185.71.196}"
+public_url="${FITOUT_PUBLIC_URL:-https://locia.work/game}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 release_dir="/var/www/fitout/releases/$stamp"
 previous_release="$(ssh -o BatchMode=yes "$remote" 'readlink -f /var/www/fitout/current 2>/dev/null || true')"
@@ -32,8 +33,8 @@ scp deploy/fitout-save.service "$remote:/etc/systemd/system/fitout-save.service.
 deployed=1
 ssh "$remote" "set -e; python3 -m py_compile /opt/fitout-save/server.py.new; install -m 755 /opt/fitout-save/server.py.new /opt/fitout-save/server.py; install -m 644 /etc/systemd/system/fitout-save.service.new /etc/systemd/system/fitout-save.service; rm -f /opt/fitout-save/server.py.new /etc/systemd/system/fitout-save.service.new; systemctl daemon-reload; systemctl restart fitout-save.service; api_ok=0; for attempt in {1..30}; do if curl --fail --silent http://127.0.0.1:4188/health | grep -Fq '\"ok\":true'; then api_ok=1; break; fi; sleep .2; done; test \"\$api_ok\" = 1; ln -sfn '$release_dir' /var/www/fitout/current.next; mv -Tf /var/www/fitout/current.next /var/www/fitout/current"
 
-FITOUT_EXPECTED_VERSION=v0.1.0 bash scripts/public-smoke.sh https://fitout.ovc.me
+FITOUT_EXPECTED_VERSION=v0.1.0 bash scripts/public-smoke.sh "$public_url"
 ssh "$remote" "test \"\$(readlink -f /var/www/fitout/current)\" = '$release_dir' && systemctl is-active --quiet fitout-save.service"
 deployed=0
 trap - ERR
-printf 'deployed v0.1.0 · %s · backup /var/backups/fitout/%s/players.json\n' "$release_dir" "$stamp"
+printf 'deployed v0.1.0 · %s · %s · backup /var/backups/fitout/%s/players.json\n' "$release_dir" "$public_url" "$stamp"

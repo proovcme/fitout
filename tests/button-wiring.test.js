@@ -11,7 +11,8 @@ test('the public root is a compact playable menu for the current design-to-build
   assert.match(html,/data-fitout-entry/);
   assert.match(html,/entry-menu\.js/);
   assert.match(html,/fitout-chapter-one\.html\?mode=design/);
-  assert.match(html,/fitout-chapter-one\.html\?mode=site/);
+  assert.doesNotMatch(html,/fitout-chapter-one\.html\?mode=site/);
+  assert.doesNotMatch(html,/Сначала осмотреть объект/);
   assert.match(html,/class="app-shell" hidden aria-hidden="true"/);
   assert.doesNotMatch(html,/root-redirect\.js/);
 });

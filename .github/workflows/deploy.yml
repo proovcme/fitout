@@ -1,0 +1,58 @@
+name: Test and deploy FITOUT
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fitout-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Release locia.work/game
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://locia.work/game/
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure the dedicated deploy key
+        env:
+          FITOUT_SSH_PRIVATE_KEY: ${{ secrets.FITOUT_SSH_PRIVATE_KEY }}
+          FITOUT_SSH_HOST: ${{ secrets.FITOUT_SSH_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$FITOUT_SSH_PRIVATE_KEY"
+          test -n "$FITOUT_SSH_HOST"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$FITOUT_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 10 -H "$FITOUT_SSH_HOST" > "$HOME/.ssh/known_hosts"
+
+      - name: Test, build, back up, deploy, and smoke-test
+        env:
+          FITOUT_SSH: root@${{ secrets.FITOUT_SSH_HOST }}
+          FITOUT_PUBLIC_URL: https://locia.work/game
+        run: npm run deploy
