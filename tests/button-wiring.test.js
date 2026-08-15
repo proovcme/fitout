@@ -6,10 +6,10 @@ const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const script=readFileSync(new URL('../game.js',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 const core=readFileSync(new URL('../game-core.js',import.meta.url),'utf8');
-const rootRedirect=readFileSync(new URL('../root-redirect.js',import.meta.url),'utf8');
+const rootRedirect=readFileSync(new URL('../public/root-redirect.js',import.meta.url),'utf8');
 
 test('the public root immediately enters the playable design and construction chapter',()=>{
-  assert.match(html,/<script type="module" src="\.\/root-redirect\.js"><\/script>/);
+  assert.match(html,/<script vite-ignore src="\.\/root-redirect\.js"><\/script>/);
   assert.match(html,/<body hidden>/);
   assert.match(rootRedirect,/new URL\('\.\/prototypes\/fitout-chapter-one\.html', window\.location\.href\)/);
   assert.match(rootRedirect,/window\.location\.replace\(chapter\.href\)/);
