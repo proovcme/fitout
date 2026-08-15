@@ -20,7 +20,6 @@ SNIPPET = r'''
 	handle_path /game/* {
 		header {
 			-Server
-			Cache-Control "no-store"
 			Strict-Transport-Security "max-age=31536000; includeSubDomains"
 			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 			X-Content-Type-Options "nosniff"
@@ -29,6 +28,10 @@ SNIPPET = r'''
 			Permissions-Policy "camera=(), microphone=(), geolocation=()"
 			Cross-Origin-Resource-Policy "same-origin"
 		}
+		@fitout_assets path /assets/*
+		header @fitout_assets Cache-Control "public, max-age=31536000, immutable"
+		@fitout_documents not path /assets/*
+		header @fitout_documents Cache-Control "no-store"
 		root * /var/www/fitout/current
 		try_files {path} /index.html
 		file_server

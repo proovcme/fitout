@@ -20,6 +20,14 @@ export default defineConfig({
         main: resolve(import.meta.dirname, 'index.html'),
         chapterOne: resolve(import.meta.dirname, 'prototypes/fitout-chapter-one.html'),
       },
+      output: {
+        // Keep the engine and reusable simulation code out of the chapter entry.
+        // Browsers can fetch these hashed chunks in parallel instead of staring at
+        // an empty canvas while one large module crosses a slow mobile link.
+        manualChunks(moduleId) {
+          if (moduleId.includes('/node_modules/three/')) return 'three';
+        },
+      },
     },
   },
 });
