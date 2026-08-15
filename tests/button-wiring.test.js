@@ -7,6 +7,12 @@ const script=readFileSync(new URL('../game.js',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 const core=readFileSync(new URL('../game-core.js',import.meta.url),'utf8');
 
+test('the public root immediately enters the playable design and construction chapter',()=>{
+  assert.match(html,/new URL\('\.\/prototypes\/fitout-chapter-one\.html', window\.location\.href\)/);
+  assert.match(html,/window\.location\.replace\(chapter\.href\)/);
+  assert.ok(html.indexOf('window.location.replace(chapter.href)')<html.indexOf('<link rel="stylesheet"'), 'redirect must run before the legacy menu can render');
+});
+
 test('every static button is wired directly or through its form',()=>{
   const ids=[...html.matchAll(/<button[^>]*\sid="([^"]+)"/g)].map(match=>match[1]);
   const formSubmitIds=new Set(['loginButton']);
