@@ -1,4 +1,4 @@
-name: Test and deploy FITOUT
+name: Test FITOUT release
 
 on:
   push:
@@ -9,17 +9,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: fitout-production
+  group: fitout-release-tests
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Release locia.work/game
+  test:
+    name: Verify release candidate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment:
-      name: production
-      url: https://locia.work/game/
+    timeout-minutes: 15
     steps:
       - name: Check out the exact commit
         uses: actions/checkout@v4
@@ -38,21 +35,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Configure the dedicated deploy key
-        env:
-          FITOUT_SSH_PRIVATE_KEY: ${{ secrets.FITOUT_SSH_PRIVATE_KEY }}
-          FITOUT_SSH_HOST: ${{ secrets.FITOUT_SSH_HOST }}
-        run: |
-          set -euo pipefail
-          test -n "$FITOUT_SSH_PRIVATE_KEY"
-          test -n "$FITOUT_SSH_HOST"
-          install -d -m 700 "$HOME/.ssh"
-          printf '%s\n' "$FITOUT_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
-          chmod 600 "$HOME/.ssh/id_ed25519"
-          ssh-keyscan -T 10 -H "$FITOUT_SSH_HOST" > "$HOME/.ssh/known_hosts"
-
-      - name: Test, build, back up, deploy, and smoke-test
-        env:
-          FITOUT_SSH: root@${{ secrets.FITOUT_SSH_HOST }}
-          FITOUT_PUBLIC_URL: https://locia.work/game
-        run: npm run deploy
+      - name: Test and build the exact commit
+        run: npm run test:release

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check FITOUT main for a verified deployable update every minute
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=60s
+Persistent=true
+Unit=fitout-autodeploy.service
+
+[Install]
+WantedBy=timers.target

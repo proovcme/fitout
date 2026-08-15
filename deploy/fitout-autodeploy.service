@@ -1,0 +1,13 @@
+[Unit]
+Description=Fetch, verify, and atomically deploy the latest FITOUT main commit
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/fitout-autodeploy/run.sh
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
