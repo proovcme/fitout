@@ -6,13 +6,55 @@
     <meta name="theme-color" content="#0f1613" />
     <meta name="description" content="FITOUT — игра про управление строительством и ремонтом офисов." />
     <title>FITOUT — офис должен открыться в понедельник</title>
-    <script vite-ignore src="./root-redirect.js"></script>
-    <noscript><meta http-equiv="refresh" content="0; url=./prototypes/fitout-chapter-one.html" /></noscript>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23ddff55'/%3E%3Cpath d='M16 18h34v9H27v8h19v9H27v12H16z' fill='%230f1613'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="entry-menu.js"></script>
   </head>
-  <body hidden>
-    <div class="app-shell">
+  <body class="entry-body">
+    <main class="entry-menu" data-fitout-entry>
+      <header class="entry-topbar">
+        <div class="entry-brand"><span>F</span><strong>FITOUT</strong></div>
+        <small>ОФИС ДОЛЖЕН ОТКРЫТЬСЯ В ПОНЕДЕЛЬНИК · v0.1.0</small>
+      </header>
+      <section class="entry-stage">
+        <div class="entry-copy">
+          <p>ПОНЕДЕЛЬНИК УЖЕ БЛИЗКО</p>
+          <h1>Нарисуйте офис.<br><em>Переживите стройку.</em></h1>
+          <a class="entry-primary" href="./prototypes/fitout-chapter-one.html?mode=design"><span>СПРОЕКТИРОВАТЬ ОФИС</span><small>90 секунд · затем REV 07 уходит людям</small><b>→</b></a>
+          <a class="entry-secondary" href="./prototypes/fitout-chapter-one.html?mode=site">Сначала осмотреть объект</a>
+        </div>
+        <section class="entry-toy" aria-label="Проект превращается в стройку">
+          <article class="entry-plan">
+            <header><span>ПРОЕКТ</span><b>REV 06</b></header>
+            <div class="entry-grid" aria-label="Нажмите на помещение, чтобы изменить проект">
+              <div role="button" tabindex="0" data-entry-room data-kind="work"><b>РАБОТА</b><small>8 мест</small></div>
+              <div role="button" tabindex="0" data-entry-room data-kind="meeting"><b>ВСТРЕЧИ</b><small>8 мест</small></div>
+              <div role="button" tabindex="0" data-entry-room data-kind="server"><b>СЕРВЕР</b><small>стойка</small></div>
+              <div role="button" tabindex="0" data-entry-room data-kind="work"><b>РАБОТА</b><small>8 мест</small></div>
+              <div role="button" tabindex="0" data-entry-room data-kind="restroom"><b>С/У</b><small>1 узел</small></div>
+              <div role="button" tabindex="0" data-entry-room data-kind="lounge"><b>ПАУЗА</b><small>чайник</small></div>
+            </div>
+            <small class="entry-touch-hint">ПОПРОБУЙТЕ ИЗМЕНИТЬ ПОМЕЩЕНИЕ</small>
+          </article>
+          <div class="entry-handoff"><span>REV</span><b>→</b></div>
+          <article class="entry-reality">
+            <header><span>СТРОЙКА</span><b>08:47</b></header>
+            <div class="entry-grid entry-built-grid" aria-hidden="true">
+              <div data-built-room data-kind="work"><i></i><i></i></div>
+              <div data-built-room data-kind="meeting"><i></i></div>
+              <div data-built-room data-kind="server"><i></i><i></i></div>
+              <div data-built-room data-kind="work"><i></i><i></i></div>
+              <div data-built-room data-kind="restroom"><i></i></div>
+              <div data-built-room data-kind="lounge"><i></i></div>
+            </div>
+            <div class="entry-crew" aria-hidden="true"><i></i><i></i><i></i></div>
+            <p id="entryFeedback">Проект ждёт первого решения.</p>
+          </article>
+        </section>
+      </section>
+      <footer class="entry-loop"><span><b>1</b> ПРОЕКТ · 90 СЕК</span><i>→</i><span><b>2</b> ВЫПУСК · REV 07</span><i>→</i><span><b>3</b> СТРОЙКА · БАРДАК</span></footer>
+    </main>
+
+    <div class="app-shell" hidden aria-hidden="true">
       <header class="topbar">
         <div class="brand" aria-label="FITOUT">
           <span class="brand-mark">F</span>
@@ -518,6 +560,5 @@
       </section>
     </div>
 
-    <script type="module" src="game.js"></script>
   </body>
 </html>
