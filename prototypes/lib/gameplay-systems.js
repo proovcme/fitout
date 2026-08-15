@@ -16,7 +16,15 @@ export const QUESTS={
     {id:'supply',event:'supply_opened',target:'door',text:'Дойти до снабжения'},
     {id:'order',event:'door_ordered',target:'correct',text:'Заказать дверь правильного размера'},
     {id:'open',event:'door_opened',target:'installed',text:'Открыть установленную дверь'}
-  ],rewards:{xp:70,skillPoints:1}}
+  ],rewards:{xp:70,skillPoints:1}},
+  build_office:{id:'build_office',title:'REV 07 становится офисом',description:'Провести собственную планировку через людей, поставки, инженерные коллизии и физическую стройку.',objectives:[
+    {id:'release',event:'office_released',target:'rev07',text:'Выпустить планировку в работу'},
+    {id:'setup',event:'construction_done',target:'demolition',text:'Подготовить и разметить площадку'},
+    {id:'partition',event:'construction_done',target:'partition',text:'Построить стены и постоянный вход'},
+    {id:'engineering',event:'construction_done',target:'engineering',text:'Смонтировать свет, розетки и сети'},
+    {id:'finish',event:'construction_done',target:'finish',text:'Закончить отделку помещений'},
+    {id:'furniture',event:'construction_done',target:'furniture',text:'Установить мебель и сдать офис'}
+  ],rewards:{xp:140,skillPoints:2}}
 };
 
 export class GameState{
