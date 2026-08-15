@@ -18,6 +18,7 @@ export class PhysicalConstruction{
   pause(id){const job=this.jobs.get(id);if(job?.status!=='working')return false;job.status='paused';this.notify();return true}
   resume(id,{speed,quality}={}){const job=this.jobs.get(id);if(job?.status!=='paused')return false;job.status='working';if(speed)job.speed=speed;if(quality)job.quality=quality;this.notify();return true}
   accelerate(id){const job=this.jobs.get(id);if(job?.status!=='working')return false;job.speed=Math.min(1.8,job.speed+.35);job.quality=Math.max(.35,job.quality-.12);job.mistakes.push('accelerated_under_pressure');this.notify();return true}
+  addMistake(id,mistake){const job=this.jobs.get(id);if(!job||!mistake||job.mistakes.includes(mistake))return false;job.mistakes.push(String(mistake));job.quality=Math.max(.35,job.quality-.08);this.notify();return true}
   tick(dt,{boosts={}}={}){let changed=false;for(const job of this.jobs.values())if(job.status==='working'){const presenceBoost=boosts[job.id]||0;job.progress=Math.min(1,job.progress+dt*(job.speed+presenceBoost)/job.duration);changed=true;if(job.progress>=1){job.status='done';this.facts.add(job.id);this.refresh()}}if(changed)this.notify()}
   snapshot(){return{facts:[...this.facts],jobs:[...this.jobs.values()].map(job=>({...job})),complete:[...this.jobs.values()].every(job=>job.status==='done')}}
 }
