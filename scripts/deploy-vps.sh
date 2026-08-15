@@ -24,7 +24,7 @@ trap rollback ERR
 
 bash scripts/test-release.sh
 
-ssh "$remote" "install -d -m 755 '$release_dir' /var/backups/fitout/$stamp; if test -f /var/lib/fitout/players.json; then cp --preserve=mode,timestamps /var/lib/fitout/players.json /var/backups/fitout/$stamp/players.json; fi; cp /opt/fitout-save/server.py '$server_backup'"
+ssh "$remote" "install -d -m 755 '$release_dir' /var/backups/fitout/$stamp; if test -n '$previous_release' && test -d '$previous_release'; then cp -al '$previous_release/.' '$release_dir/'; fi; if test -f /var/lib/fitout/players.json; then cp --preserve=mode,timestamps /var/lib/fitout/players.json /var/backups/fitout/$stamp/players.json; fi; cp /opt/fitout-save/server.py '$server_backup'"
 rsync -az --delete dist/ "$remote:$release_dir/"
 scp server/server.py "$remote:/opt/fitout-save/server.py.new"
 scp deploy/fitout-save.service "$remote:/etc/systemd/system/fitout-save.service.new"
