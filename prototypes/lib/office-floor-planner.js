@@ -33,6 +33,9 @@ export class OfficeFloorPlanner{
   placeItem(index,item){if(!this.valid(index)||!FLOOR_ITEM_TYPES[item])return false;const cell=this.cells[index],type=FLOOR_ITEM_TYPES[item];if(!type.rooms.includes(cell.room))return false;cell.item=cell.item===item?null:item;return true}
   toggleNetwork(index,network){if(!this.valid(index)||!FLOOR_NETWORK_TYPES[network]||!this.cells[index].room)return false;const cell=this.cells[index];cell[network]=!cell[network];return true}
   erase(index){if(!this.valid(index)||this.cells[index].entrance)return false;this.cells[index]=cleanCell();return true}
+  addConnectionDoors(){
+    const connected=this.connectivity().components.filter(component=>component.connected);for(const component of connected){const doorway=component.cells.find(index=>this.neighbors(index).some(next=>this.cells[next].room==='corridor'));if(doorway!==undefined)this.cells[doorway].door=true}return connected.length
+  }
   autoPlan(){
     this.cells=Array.from({length:this.cols*this.rows},cleanCell);this.cells[this.entranceIndex]={...cleanCell(),room:'corridor',entrance:true,door:true};
     const paint=(left,top,right,bottom,room)=>this.paintRect(top*this.cols+left,bottom*this.cols+right,room),at=(col,row)=>row*this.cols+col;
@@ -44,7 +47,7 @@ export class OfficeFloorPlanner{
     paint(7,6,10,7,'lounge');
     for(const index of[at(2,0),at(3,1),at(4,2)])this.placeItem(index,'desk');
     this.placeItem(at(8,0),'meetingTable');this.placeItem(at(4,4),'toilet');this.placeItem(at(7,3),'rack');this.placeItem(at(8,6),'sofa');
-    for(const index of[at(2,0),at(4,1),at(5,2),at(8,0),at(4,4),at(7,3),at(8,6)]){this.toggleNetwork(index,'light');this.toggleNetwork(index,'socket')}
+    for(const index of[at(2,0),at(4,1),at(5,2),at(8,0),at(4,4),at(7,3),at(8,6)]){this.toggleNetwork(index,'light');this.toggleNetwork(index,'socket')}this.addConnectionDoors();
     return this.snapshot()
   }
   connectivity(){const entrance=this.cells.findIndex(cell=>cell.entrance&&cell.room==='corridor'),corridor=new Set(),queue=entrance>=0?[entrance]:[];while(queue.length){const index=queue.shift();if(corridor.has(index)||this.cells[index].room!=='corridor')continue;corridor.add(index);for(const next of this.neighbors(index))if(!corridor.has(next)&&this.cells[next].room==='corridor')queue.push(next)}const visited=new Set(),components=[];for(let index=0;index<this.cells.length;index++){const room=this.cells[index].room;if(!room||room==='corridor'||visited.has(index))continue;const cells=[],pending=[index];visited.add(index);while(pending.length){const current=pending.shift();cells.push(current);for(const next of this.neighbors(current))if(!visited.has(next)&&this.cells[next].room===room){visited.add(next);pending.push(next)}}components.push({room,cells,connected:cells.some(cellIndex=>this.neighbors(cellIndex).some(next=>corridor.has(next)))})}return{entrance,corridor:[...corridor],components,connected:components.filter(component=>component.connected).length,total:components.length,complete:entrance>=0&&corridor.size>=2&&components.length>0&&components.every(component=>component.connected)}}
