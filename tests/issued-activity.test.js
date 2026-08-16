@@ -18,8 +18,8 @@ test('work states visibly distinguish travel carrying and active work',()=>{
 });
 
 test('completed sessions preserve relationships and increase the next run depth',()=>{
-  assert.match(chapter,/FITOUT_RUN_META_KEY='fitout-run-meta-v1'/);
-  assert.match(chapter,/depth:\(savedFitoutRunMeta\.runs\|\|0\)\+1/);
-  assert.match(chapter,/localStorage\.setItem\(FITOUT_RUN_META_KEY,JSON\.stringify\(fitoutRun\.meta\)\)/);
+  assert.match(chapter,/loadFitoutProfile\(localStorage\)/);
+  assert.match(chapter,/depth:fitoutProfile\.runs\+1/);
+  assert.match(chapter,/saveFitoutProfile\(localStorage,fitoutProfile\)/);
   assert.match(chapter,/fitoutRun\.remember\(npc\.profile\.storyId,safe\?1:-1/);
 });

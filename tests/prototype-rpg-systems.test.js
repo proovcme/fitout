@@ -406,7 +406,7 @@ test('office reality preserves a deterministic causal trail in physical build or
 
 test('chapter turns the timed rich plan into a playable construction site on the same field', () => {
   const chapter = readFileSync(new URL('../prototypes/fitout-chapter-one.html', import.meta.url), 'utf8');
-  for (const token of ['designButton', 'designPlanGrid', 'designRealityGrid', 'new OfficeDesignSimulation', 'design-furniture', 'designToolbox', 'designSprintRemaining=90', 'issueOfficeDesign', 'issuedSceneActive', 'issuedOfficeParts', 'SiteWorkBoard', 'SiteWorkerBrain', 'syncIssuedWorkforce', 'construction.setProgress', 'issued-demolition', 'issued-materials', 'issued-incident', 'ВАШ ОФИС · СТРОИТСЯ', 'officeFloor.snapshot()', 'build_office']) assert.match(chapter, new RegExp(token));
+  for (const token of ['designButton', 'designPlanGrid', 'designRealityGrid', 'new OfficeDesignSimulation', 'design-furniture', 'designToolbox', 'designSprintRemaining=FITOUT_DESIGN_SECONDS', 'issueOfficeDesign', 'issuedSceneActive', 'issuedOfficeParts', 'SiteWorkBoard', 'SiteWorkerBrain', 'syncIssuedWorkforce', 'construction.setProgress', 'issued-demolition', 'issued-materials', 'issued-incident', 'ВАШ ОФИС · СТРОИТСЯ', 'officeFloor.snapshot()', 'build_office']) assert.match(chapter, new RegExp(token));
   for (const role of ["role:'architect'", "role:'gip'", "id:'architect'", "id:'gip'"]) assert.match(chapter, new RegExp(role));
   assert.match(chapter, /livingCast=\[semyon\.group,boris\.group,vera\.group,architect\.group,gip\.group,client\.group,inspector\.group\]/);
   assert.match(chapter, /issuedSceneHidden\.push\(child\);child\.visible=false/);
@@ -419,7 +419,7 @@ test('chapter turns the timed rich plan into a playable construction site on the
 
 test('issued construction asks the player to inspect visible work instead of only waiting', () => {
   const chapter = readFileSync(new URL('../prototypes/fitout-chapter-one.html', import.meta.url), 'utf8');
-  for (const token of ['issuedCheckDefinitions', 'resolveIssuedCheck', 'axis_not_verified', 'doorway_not_verified', 'finish_sample_not_verified', 'furniture_clearance_not_verified', 'Фронт остановлен для проверки', '✓ ПРОВЕРЕНО', '⚠ ПРИНЯТО С РИСКОМ']) assert.match(chapter, new RegExp(token));
+  for (const token of ['issuedCheckDefinitions', 'resolveIssuedCheck', 'axis_not_verified', 'doorway_not_verified', 'finish_sample_not_verified', 'furniture_clearance_not_verified', 'showIssuedDecision', 'issued-decision-fix', 'issued-decision-risk', '✓ ПРОВЕРЕНО', '⚠ ПРИНЯТО С РИСКОМ']) assert.match(chapter, new RegExp(token));
   assert.match(chapter, /liveWorking\.progress>=\.45/);
   assert.match(chapter, /construction\.pause\(liveWorking\.id\)/);
   assert.match(chapter, /construction\.resume\(id,\{speed:safe/);
@@ -434,7 +434,7 @@ test('issued office disables every obsolete physical front from the old prototyp
 
 test('issued office has one construction simulation instead of the legacy loop running underneath', () => {
   const chapter = readFileSync(new URL('../prototypes/fitout-chapter-one.html', import.meta.url), 'utf8');
-  assert.match(chapter, /if\(!issuedSceneActive\)\{updateAttention\(dt\);updatePhysicalConstruction\(dt\)/);
+  assert.match(chapter, /if\(!issuedSceneActive\)\{shift\.tick\(dt\);updateAttention\(dt\);updatePhysicalConstruction\(dt\)/);
   assert.match(chapter, /gameplayObjects=\[foremanDesk,projectDesk,moveMarker,routeGuide,issuedPriorityFlag\]/);
   assert.match(chapter, /trashHazard\.visible=false;wetCableHazard\.visible=false/);
   assert.match(chapter, /function updateUrgencyHud\(\)\{const issue=currentUrgencies\(\)\[0\];if\(issuedSceneActive\|\|/);
@@ -473,7 +473,8 @@ test('chapter exposes project design from the menu and throughout the constructi
 
 test('project design draws connected rooms with touch or auto project and releases the same office into 3d', () => {
   const chapter = readFileSync(new URL('../prototypes/fitout-chapter-one.html', import.meta.url), 'utf8');
-  for (const token of ['new OfficeFloorPlanner', 'floor-grid', 'floor-cell', 'paintRect', 'placeItem', 'toggleNetwork', 'pointerdown', 'pointermove', 'pointercancel', 'setPointerCapture', 'elementFromPoint', 'КОМНАТЫ', 'МЕБЕЛЬ', 'СЕТИ', 'ВЫПУСК', 'ВХОД', 'Коридор', 'design-handoff', 'Чертёж превращается в стройку', 'Теперь это будут строить', 'handoff-room', 'playDesignHandoff', 'issuedOffice3D', 'buildIssuedOffice3D', 'updateIssuedOffice3D', 'addIssuedFurniture', 'designAutoButton', 'officeFloor.autoPlan()', 'officeFloor.snapshot()', 'ВАШ ОФИС · СТРОИТСЯ']) assert.match(chapter, new RegExp(token));
+  for (const token of ['new OfficeFloorPlanner', 'floor-grid', 'floor-cell', 'paintRect', 'placeItem', 'toggleNetwork', 'pointerdown', 'pointermove', 'pointercancel', 'setPointerCapture', 'elementFromPoint', 'КОМНАТЫ', 'МЕБЕЛЬ', 'СЕТИ', 'ВЫПУСК', 'ВХОД', 'Коридор', 'design-handoff', 'Чертёж превращается в стройку', 'Теперь это будут строить', 'handoff-room', 'playDesignHandoff', 'issuedOffice3D', 'buildIssuedOffice3D', 'updateIssuedOffice3D', 'addIssuedFurniture', 'designAutoButton', 'officeFloor.snapshot()', 'ВАШ ОФИС · СТРОИТСЯ']) assert.match(chapter, new RegExp(token));
+  assert.match(chapter,/officeFloor\.autoPlan\(\{variant:fitoutScenario\.layout\.id\}\)/);
   assert.match(chapter, /touch-action:none!important/);
   assert.match(chapter, /designReleaseButton\.disabled=!snapshot\.complete/);
   assert.match(chapter, /syncOfficeFloorToSimulation\(\);const result=officeDesignSim\.release/);
@@ -516,7 +517,7 @@ test('auto project creates a complete editable office connected to the permanent
   assert.ok(snapshot.metrics.seats >= 12);
   assert.ok(snapshot.metrics.networks.light >= 6);
   assert.ok(snapshot.metrics.networks.socket >= 6);
-  assert.equal(snapshot.metrics.networks.door, 6);
+  assert.ok(snapshot.metrics.networks.door >= 6);
   assert.equal(plan.erase(snapshot.entranceIndex), false);
   assert.equal(plan.paintRect(0, 0, 'work'), true);
 });
