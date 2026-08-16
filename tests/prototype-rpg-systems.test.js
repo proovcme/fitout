@@ -406,9 +406,9 @@ test('office reality preserves a deterministic causal trail in physical build or
 
 test('chapter turns the timed rich plan into a playable construction site on the same field', () => {
   const chapter = readFileSync(new URL('../prototypes/fitout-chapter-one.html', import.meta.url), 'utf8');
-  for (const token of ['designButton', 'designPlanGrid', 'designRealityGrid', 'new OfficeDesignSimulation', 'design-furniture', 'designToolbox', 'designSprintRemaining=FITOUT_DESIGN_SECONDS', 'issueOfficeDesign', 'issuedSceneActive', 'issuedOfficeParts', 'SiteWorkBoard', 'SiteWorkerBrain', 'syncIssuedWorkforce', 'construction.setProgress', 'issued-demolition', 'issued-materials', 'issued-incident', 'ВАШ ОФИС · СТРОИТСЯ', 'officeFloor.snapshot()', 'build_office']) assert.match(chapter, new RegExp(token));
+  for (const token of ['designButton', 'designPlanGrid', 'designRealityGrid', 'new OfficeDesignSimulation', 'design-furniture', 'designToolbox', 'designSprintRemaining=FITOUT_DESIGN_SECONDS', 'issueOfficeDesign', 'issuedSceneActive', 'issuedOfficeParts', 'SiteWorkBoard', 'SiteWorkerBrain', 'syncIssuedWorkforce', 'construction.setProgress', 'issued-demolition', 'issued-materials', 'issued-incident', 'ВАШ ОФИС · СТРОИТСЯ', 'officeFloor.snapshot()', 'build_office', 'startOfficeCommissioning', 'updateOfficeCommissioning', 'analyzeOfficeCommissioning', 'resultScore', 'ОЧКОВ']) assert.match(chapter, new RegExp(token));
   for (const role of ["role:'architect'", "role:'gip'", "id:'architect'", "id:'gip'"]) assert.match(chapter, new RegExp(role));
-  assert.match(chapter, /livingCast=\[semyon\.group,boris\.group,vera\.group,architect\.group,gip\.group,client\.group,inspector\.group\]/);
+  assert.match(chapter, /siteCast=\[semyon\.group,boris\.group,vera\.group,architect\.group,gip\.group,client\.group,inspector\.group\],livingCast=\[\.\.\.siteCast,\.\.\.officeUsers\.map/);
   assert.match(chapter, /issuedSceneHidden\.push\(child\);child\.visible=false/);
   assert.match(chapter, /wallProgress.*networkProgress.*furnitureProgress/);
   assert.match(chapter, /desiredFocus\.copy\(player\.position\)/);
@@ -599,7 +599,7 @@ test('issued-site AI routes every role through real door gaps and built-wall col
 test('raised walls cut away between the camera and every visible character', () => {
   const chapter = readFileSync(new URL('../prototypes/fitout-chapter-one.html', import.meta.url), 'utf8');
   assert.match(chapter, /function collectWallOccluders\(items,target,occluding,spread=\.42\)/);
-  assert.match(chapter, /for\(const npc of\[semyon,boris,vera,architect,gip,client,inspector\]\)/);
+  assert.match(chapter, /for\(const npc of\[semyon,boris,vera,architect,gip,client,inspector,\.\.\.officeUsers\]\)/);
   assert.match(chapter, /collectWallOccluders\(issuedOfficeParts\.walls,heroHead,issuedOccluding,0\)/);
   assert.match(chapter, /hiddenOpacity:\.06,restingOpacity:\.72/);
 });

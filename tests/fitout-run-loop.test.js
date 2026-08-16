@@ -1,14 +1,14 @@
 import test from'node:test';
 import assert from'node:assert/strict';
-import{FitoutRun,FITOUT_RUN_SECONDS,FITOUT_DESIGN_SECONDS,FITOUT_BUILD_SECONDS}from'../prototypes/lib/fitout-run.js';
+import{FitoutRun,FITOUT_RUN_SECONDS,FITOUT_DESIGN_SECONDS,FITOUT_BUILD_SECONDS,FITOUT_COMMISSION_SECONDS}from'../prototypes/lib/fitout-run.js';
 import{generateFitoutRun,FITOUT_LAYOUT_VARIANTS,FITOUT_SITUATIONS}from'../prototypes/lib/fitout-run-generator.js';
 import{DEFAULT_FITOUT_PROFILE,migrateFitoutProfile,completeFitoutRun,loadFitoutProfile,saveFitoutProfile,FITOUT_PROFILE_KEY}from'../prototypes/lib/fitout-progression.js';
 import{OfficeFloorPlanner,FLOOR_ITEM_TYPES}from'../prototypes/lib/office-floor-planner.js';
 import{readFileSync}from'node:fs';
 
 test('a complete planning and build session never exceeds three minutes',()=>{
-  assert.equal(FITOUT_RUN_SECONDS,180);assert.equal(FITOUT_DESIGN_SECONDS,45);assert.equal(FITOUT_BUILD_SECONDS,135);
-  const run=new FitoutRun({seed:'three-minutes'});run.tickPlanning(45);assert.equal(run.remaining,0);assert.equal(run.start(),true);run.tick(134);assert.equal(run.status,'building');run.tick(1);assert.equal(run.status,'lost');assert.ok(run.elapsed<=180)
+  assert.equal(FITOUT_RUN_SECONDS,180);assert.equal(FITOUT_DESIGN_SECONDS,40);assert.equal(FITOUT_BUILD_SECONDS,110);assert.equal(FITOUT_COMMISSION_SECONDS,30);
+  const run=new FitoutRun({seed:'three-minutes'});run.tickPlanning(40);assert.equal(run.remaining,0);assert.equal(run.start(),true);run.tick(109);assert.equal(run.status,'building');assert.equal(run.startCommissioning(),true);run.tickCommissioning(30);assert.equal(run.remaining,0);assert.equal(run.finish({won:true}),true);assert.ok(run.elapsed<=180)
 });
 
 test('fixing spends time while accepting risk visibly spends quality',()=>{
@@ -25,7 +25,7 @@ test('every unlocked generated layout auto-plans a connected office for its brie
 
 test('progression migrates legacy state and unlocks layouts furniture briefs and conditions',()=>{
   const migrated=migrateFitoutProfile({}, {runs:2,wins:1,relationships:{semyon:4},lessons:['axis']});assert.equal(migrated.version,2);assert.equal(migrated.runs,2);assert.equal(migrated.relationships.semyon,4);
-  const result=completeFitoutRun(migrated,{won:true,seconds:144,quality:88,seed:'next',situations:['axis_shift']});assert.equal(result.profile.runs,3);assert.equal(result.profile.bestSeconds,144);assert.ok(result.profile.unlockedLayouts.includes('bent'));assert.ok(result.profile.unlockedFurniture.includes('kitchenette'));assert.ok(result.profile.unlockedBriefs.includes('support'));assert.ok(result.profile.unlockedConditions.includes('cost_pressure'));assert.ok(Object.keys(FLOOR_ITEM_TYPES).length>=12)
+  const result=completeFitoutRun(migrated,{won:true,seconds:144,score:8420,quality:88,commissionScore:81,commissionMoment:'Все маршруты встретились в одном коридоре.',whatIf:'Развести маршруты.',seed:'next',situations:['axis_shift']});assert.equal(result.profile.runs,3);assert.equal(result.profile.bestSeconds,144);assert.equal(result.profile.highestScore,8420);assert.equal(result.profile.lastOutcome.commissionScore,81);assert.equal(result.profile.lastOutcome.whatIf,'Развести маршруты.');assert.ok(result.profile.unlockedLayouts.includes('bent'));assert.ok(result.profile.unlockedFurniture.includes('kitchenette'));assert.ok(result.profile.unlockedBriefs.includes('support'));assert.ok(result.profile.unlockedConditions.includes('cost_pressure'));assert.ok(Object.keys(FLOOR_ITEM_TYPES).length>=12)
 });
 
 test('versioned profile survives a localStorage-compatible round trip',()=>{
